@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 import requests
 
 from . import __version__
-from .utils import a2s, s2a
+from .utils import s2a
+
 
 class SyncError(Exception):
     def __init__(self, errorstring='Undefined'):
@@ -22,13 +23,16 @@ class BackOffException(Exception):
     def __init__(self, min, max):
         self.min = min
         self.max = max
+
     def getAValue(self):
         return random.randint(self.min, self.max)
+
 
 def toXML(name, attrs={}, childs=[], body=None):
     elem = ET.Element(name, attrib=attrs)
     if childs:
-        elem.extend(tuplesToXML(childs))
+        for XMLElem in tuplesToXML(childs):
+            elem.append(XMLElem)
     if body is not None:
         elem.text = body
     return elem
@@ -76,12 +80,13 @@ class GalileoClient(object):
                  'minor': str(dongle.minor)}))
         client.append(info)
         if data is not None:
-            client.extend(tuplesToXML(data))
+            for XMLElem in tuplesToXML(data):
+                client.append(XMLElem)
 
         f = StringIO.StringIO()
 
         tree = ET.ElementTree(client)
-        tree.write(f, xml_declaration=True, encoding="UTF-8")
+        tree.write(f, "UTF-8")
 
         logger.debug('HTTP POST=%s', f.getvalue())
         r = requests.post(self.url,
@@ -105,15 +110,13 @@ class GalileoClient(object):
             if stag == 'error':
                 raise SyncError(sbody)
             elif stag == 'back-off':
-                min=0
-                max=0
+                minD = 0
+                maxD = 0
                 for schild in schilds:
                     sstag, _, _, ssbody = schild
-                    if sstag == 'min':
-                        min = int(ssbody)
-                    elif sstag == 'max':
-                        max = int(ssbody)
-                raise BackOffException(min, max)
+                    if sstag == 'min': minD = int(ssbody)
+                    if sstag == 'max': maxD = int(ssbody)
+                raise BackOffException(minD, maxD)
 
         return childs
 
@@ -136,7 +139,8 @@ class GalileoClient(object):
 
         _, a, c, _ = tracker
         if a['tracker-id'] != trackerId:
-            logger.error('Got the response for tracker %s, expected tracker %s', a['tracker-id'], trackerId)
+            logger.error('Got the response for tracker %s, expected tracker %s',
+                         a['tracker-id'], trackerId)
         if a['type'] != 'megadumpresponse':
             logger.error('Not a megadumpresponse: %s', a['type'])
 
