@@ -3,7 +3,7 @@ from ctypes import c_byte
 import logging
 logger = logging.getLogger(__name__)
 
-from .dongle import TimeoutError, CM, DM, isStatus
+from .dongle import DM, CM, isStatus
 from .dump import Dump
 from .utils import a2x, i2lsba, a2lsbi
 
@@ -40,23 +40,27 @@ class FitbitClient(object):
         if not isStatus(self.dongle.ctrl_read(), 'TerminateLink'):
             return False
 
-        try:
-            # It is OK to have a timeout with the following ctrl_read as
-            # they are there to clean up any connection left open from
-            # the previous attempts.
-            self.dongle.ctrl_read()
-            self.dongle.ctrl_read()
-            self.dongle.ctrl_read()
-        except TimeoutError:
-            # assuming link terminated
-            pass
+        # We exhaust the pipe, then we know that we have a clean state
+        goOn = True
+        while goOn:
+            goOn = self.dongle.ctrl_read() is not None
 
+    def getDongleInfo(self):
+        self.dongle.ctrl_write([2, 1, 0, 0x78, 1, 0x96])
+        d = self.dongle.ctrl_read()
+        if d is None:
+            logger.error('failed to get dongle Information')
+            return False
+        self.major = d[2]
+        self.minor = d[3]
+        logger.debug('Fitbit dongle version major:%d minor:%d', self.major,
+                     self.minor)
         return True
 
     def getDongleInfo(self):
         self.dongle.ctrl_write(CM(1))
         d = self.dongle.ctrl_read()
-        if d.INS != 8:
+        if (d is None) or (d.INS != 8):
             return False
         self.dongle.setVersion(d.payload[0], d.payload[1])
         return True
@@ -78,7 +82,8 @@ class FitbitClient(object):
         amount = 0
         while True:
             d = self.dongle.ctrl_read(minDuration)
-            if isStatus(d, 'StartDiscovery', False): continue
+            if d is None: continue
+            elif isStatus(d, 'StartDiscovery', False): continue
             elif d.INS == 2: break
             trackerId = d.payload[:6]
             addrType = d.payload[6]
