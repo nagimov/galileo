@@ -1,3 +1,30 @@
+galileo 0.5 (????-??-??)
+------------------------
+
+This is the next feature release of galileo, a free utility to securely
+synchronize fitbit bluetooth trackers with the fitbit web-service.
+
+Planned for this release:
+- Removal of the Timeout class (issue#43)
+- Add a pair mode (issue#33)
+- Get a UI abstraction layer (issue#31)
+
+
+galileo 0.4.1 (????-??-??)
+--------------------------
+
+This is the first patch release of galileo 0.4, a free utility to securely
+synchronize fitbit bluetooth trackers with the fitbit web-service.
+
+This release fixes a number of issues reported with the release of galileo 0.4.
+All users of galileo 0.4 are encouraged to upgrade.
+
+Main changes since 0.4:
+- Fix a traceback in debug message (part of issue#51)
+- Fix issue when the dongle doesn't reports its version (issue#53)
+- Fix issue when ConnectionError happens during sync (issue#54)
+
+
 galileo 0.4 (2014-03-31)
 ------------------------
 

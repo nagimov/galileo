@@ -6,12 +6,16 @@ from galileo.tracker import FitbitClient
 class MyDM(object):
     def __init__(self, data):
         self.data = data
+    def asList(self): return data
 
 class MyCM(object):
     def __init__(self, data):
         self.len = data[0]
         self.INS = data[1]
         self.payload = data[2:]
+    def asList(self): return [self.len, self.INS] + self.payload
+    def __str__(self):
+        return str(self.asList())
 
 class MyDongle(object):
     def __init__(self, responses):
@@ -53,7 +57,7 @@ GOOD_SCENARIO = [
     (3, 2, 1),
     (0x20, 1, 0x43, 0x61, 0x6E, 0x63, 0x65, 0x6C, 0x44, 0x69, 0x73, 0x63, 0x6F, 0x76, 0x65, 0x72, 0x79, 0),
     (0x20, 1, 0x45, 0x73, 0x74, 0x61, 0x62, 0x6C, 0x69, 0x73, 0x68, 0x4C, 0x69, 0x6E, 0x6B, 0),
-    (3, 4),
+    (3, 4, 0),
     (0x20, 1, 0x47, 0x41, 0x50, 0x5F, 0x4C, 0x49, 0x4E, 0x4B, 0x5F, 0x45, 0x53, 0x54, 0x41, 0x42, 0x4C, 0x49, 0x53, 0x48, 0x45, 0x44, 0x5F, 0x45, 0x56, 0x45, 0x4E, 0x54, 0),
     (2, 7),
     (0xc0, 0xb),
@@ -119,7 +123,7 @@ class testScenarii(unittest.TestCase):
             if i < 12:
                 self.assertFalse(c.establishLink(ts[0]), i)
                 continue
-            self.assertTrue(c.establishLink(ts[0]))
+            self.assertTrue(c.establishLink(ts[0]), i)
             if i < 13:
                 self.assertFalse(c.toggleTxPipe(True), i)
                 continue

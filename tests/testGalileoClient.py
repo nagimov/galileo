@@ -190,6 +190,20 @@ class testSync(unittest.TestCase):
         gc = GalileoClient('rsync', 'ssh', 'a/b/c', 22)
         self.assertRaises(SyncError, gc.sync, D, T_ID, d)
 
+    def testConnectionError(self):
+        T_ID = 'abcd'
+        D = MyDongle(0, 0)
+        d = MyMegaDump('YWJjZA==')
+        def mypost(url, data, headers):
+            class Reason(object):
+                class Error(object): strerror = ''
+                reason = Error()
+            raise galileo.net.requests.exceptions.ConnectionError(Reason())
+
+        galileo.net.requests.post = mypost
+        gc = GalileoClient('a', 'b', 'c', 0)
+        self.assertRaises(SyncError, gc.sync,D, T_ID, d)
+
 class testURL(unittest.TestCase):
 
     def testWithPort(self):
