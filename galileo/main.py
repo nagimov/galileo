@@ -11,12 +11,11 @@ import requests
 
 from . import __version__
 from .config import Config
-from .dongle import (
-    FitBitDongle, TimeoutError, NoDongleException, PermissionDeniedException
-)
+from .dongle import FitBitDongle, NoDongleException, PermissionDeniedException
 from .net import GalileoClient, SyncError, BackOffException
 from .tracker import FitbitClient
 from .utils import a2x
+from . import interactive
 
 FitBitUUID = uuid.UUID('{ADAB0000-6E7D-4601-BDA2-BFFAA68956BA}')
 
@@ -37,15 +36,12 @@ def syncAllTrackers(config):
 
     fitbit.disconnect()
 
-    fitbit.getDongleInfo()
+    if not fitbit.getDongleInfo():
+        logger.warning('Failed to get connected Fitbit dongle information')
 
     logger.info('Discovering trackers to synchronize')
-    try:
-        trackers = [t for t in fitbit.discover(FitBitUUID)]
 
-    except TimeoutError:
-        logger.debug('Timeout trying to discover trackers')
-        trackers = []
+    trackers = [t for t in fitbit.discover(FitBitUUID)]
 
     logger.info('%d trackers discovered', len(trackers))
     for tracker in trackers:
@@ -70,11 +66,8 @@ def syncAllTrackers(config):
             break
 
         logger.debug('Establishing link with tracker')
-        try:
-            fitbit.establishLink(tracker)
-            fitbit.toggleTxPipe(True)
-            fitbit.initializeAirlink()
-        except TimeoutError:
+        if not (fitbit.establishLink(tracker) and fitbit.toggleTxPipe(True)
+                and fitbit.initializeAirlink(tracker)):
             logger.debug('Timeout while trying to establish link with tracker')
             logger.warning('Unable to connect with tracker %s. Skipping',
                            trackerid)
@@ -86,9 +79,8 @@ def syncAllTrackers(config):
         #time.sleep(5)
 
         logger.info('Getting data from tracker')
-        try:
-            dump = fitbit.getDump()
-        except TimeoutError:
+        dump = fitbit.getDump()
+        if dump is None:
             logger.error("Timeout downloading the dump from tracker")
             tracker.status = "Failed to download the dump (timeout)"
             yield tracker
@@ -113,7 +105,7 @@ def syncAllTrackers(config):
         else:
             logger.info('Sending tracker data to Fitbit')
             try:
-                response = galileo.sync(fitbit, trackerid, dump)
+                response = galileo.sync(fitbit.dongle, trackerid, dump)
 
                 if config.keepDumps:
                     logger.debug("Appending answer from server to %s",
@@ -129,9 +121,7 @@ def syncAllTrackers(config):
                 logger.info('Successfully sent tracker data to Fitbit')
 
                 logger.info('Passing Fitbit response to tracker')
-                try:
-                    fitbit.uploadResponse(response)
-                except TimeoutError:
+                if not fitbit.uploadResponse(response):
                     logger.warning("Timeout error while trying to give Fitbit"
                                    " response to tracker %s", trackerid)
                 tracker.status = "Synchronisation sucessfull"
@@ -142,10 +132,7 @@ def syncAllTrackers(config):
                 tracker.status = "Synchronisation failed: %s" % e.errorstring
 
         logger.debug('Disconnecting from tracker')
-        try:
-            fitbit.toggleTxPipe(False)
-            fitbit.terminateAirlink()
-        except TimeoutError:
+        if not (fitbit.toggleTxPipe(False) and fitbit.terminateAirlink()):
             logger.warning('Timeout while disconnecting from tracker %s',
                            trackerid)
             tracker.status += " (Error disconnecting)"
@@ -265,6 +252,7 @@ def main():
             'version': version_mode,
             'sync': sync,
             'daemon': daemon,
+            'interactive': interactive.main,
         }[config.mode](config)
     except:
         print "# A serious error happened, which is probably due to a"
