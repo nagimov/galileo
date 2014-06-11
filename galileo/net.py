@@ -69,6 +69,7 @@ class GalileoClient(object):
         self.host = host
         self.path = path
         self._port = port
+        self.server_state = None
 
     @property
     def port(self):
@@ -90,12 +91,14 @@ class GalileoClient(object):
             ('client-id', {}, [], self.ID),
             ('client-version', {}, [], __version__),
             ('client-mode', {}, [], mode)])
-        if (dongle is not None) and dongle.hasInfo:
+        if (dongle is not None) and dongle.hasVersion:
             info.append(toXML(
                 'dongle-version',
                 {'major': str(dongle.major),
                  'minor': str(dongle.minor)}))
         client.append(info)
+        if self.server_state is not None:
+            client.append(toXML('server-state', body=self.server_state))
         if data is not None:
             for XMLElem in tuplesToXML(data):
                 client.append(XMLElem)
@@ -118,14 +121,14 @@ class GalileoClient(object):
 
         logger.debug('HTTP response=%s', answer)
 
-        tag, attrib, childs, body = XMLToTuple(ET.fromstring(answer))
+        tag, attrib, childs, body = XMLToTuple(ET.fromstring(
+            answer.encode('utf-8')))
 
         if tag != 'galileo-server':
             logger.error("Unexpected root element: %s", tag)
 
         if attrib['version'] != "2.0":
-            logger.error("Unexpected server version: %s",
-                         attrib['version'])
+            logger.warning("Unexpected server version: %s", attrib['version'])
 
         for child in childs:
             stag, _, schilds, sbody = child
@@ -139,6 +142,15 @@ class GalileoClient(object):
                     if sstag == 'min': minD = int(ssbody)
                     if sstag == 'max': maxD = int(ssbody)
                 raise BackOffException(minD, maxD)
+            elif stag == 'server-state':
+                self.server_state = sbody
+            elif stag == 'redirect':
+                for schild in schilds:
+                    sstag, _, _, ssbody = schild
+                    if sstag == 'protocol': self.scheme = ssbody
+                    if sstag == 'host': self.host = ssbody
+                    if sstag == 'port': self._port = int(ssbody)
+                logger.info('Found redirect to %s' % self.url)
 
         return childs
 
