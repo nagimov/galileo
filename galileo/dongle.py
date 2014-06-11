@@ -20,6 +20,58 @@ except ImportError, ie:
 
 from .utils import a2x, a2s
 
+IN, OUT = 1, -1
+
+class DataRing(object):
+    """ A 'stupid' data structure that store not more that capacity elements,
+    and keeps them in order
+
+    head points to the next spot
+    queue points to the last spot
+    fill tell us how much is filled
+    """
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.ring = [None] * self.capacity
+        self.head = 0
+        self.queue = 0
+        # We can't distinguish empty from full without the fillage
+        self.fill = 0
+
+    @property
+    def empty(self):
+        return self.fill == 0
+
+    @property
+    def full(self):
+        return self.fill == self.capacity
+
+    def add(self, data):
+        if self.capacity == 0:
+            # Special case, do nothing
+            return
+        if self.full:
+            # full, don't forget to increase the queue
+            self.queue = (self.queue + 1) % self.capacity
+        self.ring[self.head] = data
+        self.head = (self.head + 1) % self.capacity
+        self.fill = min(self.fill + 1, self.capacity)
+
+    def remove(self):
+        """ For the fun, doesnt fit into our use case """
+        if self.empty:
+            # NOOP
+            return
+        self.queue = (self.queue - 1)  % self.capacity
+
+    def getData(self):
+        if self.empty:
+            return []
+        elif self.queue < self.head:
+            return self.ring[self.queue:self.head]
+        else:
+            return self.ring[self.queue:] + self.ring[:self.head]
+
 
 class USBDevice(object):
     def __init__(self, vid, pid):
@@ -52,6 +104,10 @@ class CtrlMessage(object):
     def asList(self):
         return [self.len, self.INS] + self.payload
 
+    def __cmp__(self, other):
+        if other is None: return 1
+        return cmp(self.asList(), other.asList())
+
     def __str__(self):
         d = []
         if self.payload:
@@ -81,6 +137,10 @@ class DataMessage(object):
     def asList(self):
         return self.data + [0] * (self.LENGTH - 1 - self.len) + [self.len]
 
+    def __cmp__(self, other):
+        if other is None: return 1
+        return cmp(self.data, other.data)
+
     def __str__(self):
         return ' '.join(['[', a2x(self.data), ']', '-', str(self.len)])
 
@@ -96,12 +156,6 @@ def isATimeout(excpt):
         return False
 
 
-class NoDongleException(Exception): pass
-
-
-class TimeoutError(Exception): pass
-
-
 class DongleWriteException(Exception): pass
 
 
@@ -109,6 +163,8 @@ class PermissionDeniedException(Exception): pass
 
 
 def isStatus(data, msg=None, logError=True):
+    if data is None:
+        return False
     if data.INS != 1:
         if logError:
             logging.warning("Message is not a status message: %x", data.INS)
@@ -128,12 +184,15 @@ class FitBitDongle(USBDevice):
     VID = 0x2687
     PID = 0xfb01
 
-    def __init__(self):
+    def __init__(self, logsize):
         USBDevice.__init__(self, self.VID, self.PID)
+        self.hasVersion = False
+        global log
+        log = DataRing(logsize)
 
     def setup(self):
         if self.dev is None:
-            raise NoDongleException()
+            return False
 
         try:
             if self.dev.is_kernel_driver_active(0):
@@ -153,11 +212,20 @@ class FitBitDongle(USBDevice):
         self.DataIF = cfg[(0, 0)]
         self.CtrlIF = cfg[(1, 0)]
         self.dev.set_configuration()
+        return True
+
+    def setVersion(self, major, minor):
+        self.major = major
+        self.minor = minor
+        self.hasVersion = True
+        logger.debug('Fitbit dongle version major:%d minor:%d', self.major,
+                     self.minor)
 
     def write(self, endpoint, data, timeout):
         interface = {0x02: self.CtrlIF.bInterfaceNumber,
                      0x01: self.DataIF.bInterfaceNumber}[endpoint]
         params = (endpoint, data, interface, timeout)
+        log.add((OUT, data))
         try:
             return self.dev.write(*params)
         except usb.core.USBError, ue:
@@ -167,6 +235,19 @@ class FitBitDongle(USBDevice):
         # IO Error, try again ...
         return self.dev.write(*params)
 
+    def read(self, endpoint, length, timeout):
+        interface = {0x82: self.CtrlIF.bInterfaceNumber,
+                     0x81: self.DataIF.bInterfaceNumber}[endpoint]
+        params = (endpoint, length, interface, timeout)
+        data = None
+        try:
+            data = self.dev.read(*params)
+        except usb.core.USBError, ue:
+            if not isATimeout(ue):
+                raise
+        log.add((IN, data))
+        return data
+
     def ctrl_write(self, msg, timeout=2000):
         logger.debug('--> %s', msg)
         l = self.write(0x02, msg.asList(), timeout)
@@ -175,15 +256,14 @@ class FitBitDongle(USBDevice):
             raise DongleWriteException
 
     def ctrl_read(self, timeout=2000, length=32):
-        try:
-            data = self.dev.read(0x82, length, self.CtrlIF.bInterfaceNumber,
-                                 timeout)
-        except usb.core.USBError, ue:
-            if isATimeout(ue):
-                raise TimeoutError
-            raise
-        msg = CM(None, list(data))
-        if isStatus(msg, logError=False):
+        msg = None
+        data = self.read(0x82, length, timeout)
+        if data is not None:
+            # 'None' parameter in next line means incoming
+            msg = CM(None, list(data))
+        if msg is None:
+            logger.debug('<-- ...')
+        elif isStatus(msg, logError=False):
             logger.debug('<-- %s', a2s(msg.payload))
         else:
             logger.debug('<-- %s', msg)
@@ -197,13 +277,9 @@ class FitBitDongle(USBDevice):
             raise DongleWriteException
 
     def data_read(self, timeout=2000):
-        try:
-            data = self.dev.read(0x81, DM.LENGTH, self.DataIF.bInterfaceNumber,
-                                 timeout)
-        except usb.core.USBError, ue:
-            if isATimeout(ue):
-                raise TimeoutError
-            raise
-        msg = DM(data, out=False)
-        logger.debug('<== %s', msg)
+        msg = None
+        data = self.read(0x81, DM.LENGTH, timeout)
+        if data is not None:
+            msg = DM(data, out=False)
+        logger.debug('<== %s', msg or '...')
         return msg

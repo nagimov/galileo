@@ -11,22 +11,21 @@ import requests
 
 from . import __version__
 from .config import Config
-from .dongle import (
-    FitBitDongle, TimeoutError, NoDongleException, PermissionDeniedException
-)
+from .conversation import Conversation
 from .net import GalileoClient, SyncError, BackOffException
 from .tracker import FitbitClient
+from .ui import HardCodedUI
 from .utils import a2x
+from . import dongle as dgl
+from . import interactive
 
 FitBitUUID = uuid.UUID('{ADAB0000-6E7D-4601-BDA2-BFFAA68956BA}')
 
 
 def syncAllTrackers(config):
     logger.debug('%s initialising', os.path.basename(sys.argv[0]))
-    dongle = FitBitDongle()
-    try:
-        dongle.setup()
-    except NoDongleException:
+    dongle = dgl.FitBitDongle(config.logSize)
+    if not dongle.setup():
         logger.error("No dongle connected, aborting")
         return
 
@@ -37,15 +36,12 @@ def syncAllTrackers(config):
 
     fitbit.disconnect()
 
-    fitbit.getDongleInfo()
+    if not fitbit.getDongleInfo():
+        logger.warning('Failed to get connected Fitbit dongle information')
 
     logger.info('Discovering trackers to synchronize')
-    try:
-        trackers = [t for t in fitbit.discover(FitBitUUID)]
 
-    except TimeoutError:
-        logger.debug('Timeout trying to discover trackers')
-        trackers = []
+    trackers = [t for t in fitbit.discover(FitBitUUID)]
 
     logger.info('%d trackers discovered', len(trackers))
     for tracker in trackers:
@@ -64,17 +60,15 @@ def syncAllTrackers(config):
 
         logger.info('Attempting to synchronize tracker %s', trackerid)
 
-        logger.debug('Connecting to Fitbit server and requesting status')
-        if not galileo.requestStatus(not config.httpsOnly):
-            yield tracker
-            break
+        if config.doUpload:
+            logger.debug('Connecting to Fitbit server and requesting status')
+            if not galileo.requestStatus(not config.httpsOnly):
+                yield tracker
+                break
 
         logger.debug('Establishing link with tracker')
-        try:
-            fitbit.establishLink(tracker)
-            fitbit.toggleTxPipe(True)
-            fitbit.initializeAirlink()
-        except TimeoutError:
+        if not (fitbit.establishLink(tracker) and fitbit.toggleTxPipe(True)
+                and fitbit.initializeAirlink(tracker)):
             logger.debug('Timeout while trying to establish link with tracker')
             logger.warning('Unable to connect with tracker %s. Skipping',
                            trackerid)
@@ -86,9 +80,8 @@ def syncAllTrackers(config):
         #time.sleep(5)
 
         logger.info('Getting data from tracker')
-        try:
-            dump = fitbit.getDump()
-        except TimeoutError:
+        dump = fitbit.getDump()
+        if dump is None:
             logger.error("Timeout downloading the dump from tracker")
             tracker.status = "Failed to download the dump (timeout)"
             yield tracker
@@ -113,7 +106,7 @@ def syncAllTrackers(config):
         else:
             logger.info('Sending tracker data to Fitbit')
             try:
-                response = galileo.sync(fitbit, trackerid, dump)
+                response = galileo.sync(fitbit.dongle, trackerid, dump)
 
                 if config.keepDumps:
                     logger.debug("Appending answer from server to %s",
@@ -129,12 +122,10 @@ def syncAllTrackers(config):
                 logger.info('Successfully sent tracker data to Fitbit')
 
                 logger.info('Passing Fitbit response to tracker')
-                try:
-                    fitbit.uploadResponse(response)
-                except TimeoutError:
+                if not fitbit.uploadResponse(response):
                     logger.warning("Timeout error while trying to give Fitbit"
                                    " response to tracker %s", trackerid)
-                tracker.status = "Synchronisation sucessfull"
+                tracker.status = "Synchronisation successful"
 
             except SyncError, e:
                 logger.error("Fitbit server refused data from tracker %s,"
@@ -142,10 +133,7 @@ def syncAllTrackers(config):
                 tracker.status = "Synchronisation failed: %s" % e.errorstring
 
         logger.debug('Disconnecting from tracker')
-        try:
-            fitbit.toggleTxPipe(False)
-            fitbit.terminateAirlink()
-        except TimeoutError:
+        if not (fitbit.toggleTxPipe(False) and fitbit.terminateAirlink()):
             logger.warning('Timeout while disconnecting from tracker %s',
                            trackerid)
             tracker.status += " (Error disconnecting)"
@@ -160,7 +148,7 @@ fitbit dongle. In order to do so, as root, create the file
 SUBSYSTEM=="usb", ATTR{idVendor}=="%(VID)x", ATTR{idProduct}=="%(PID)x", SYMLINK+="fitbit", MODE="0666"
 
 The dongle must then be removed and reinserted to receive the new permissions.""" % {
-    'VID': FitBitDongle.VID, 'PID': FitBitDongle.PID}
+    'VID': dgl.FitBitDongle.VID, 'PID': dgl.FitBitDongle.PID}
 
 
 def version(verbose, delim='\n'):
@@ -205,7 +193,7 @@ def sync(config):
             microseconds=boe.getAValue()*1000)
         print "I suggest waiting until %s" % later
         return
-    except PermissionDeniedException:
+    except dgl.PermissionDeniedException:
         print PERMISSION_DENIED_HELP
         return
     print '\n'.join(statuses)
@@ -235,6 +223,8 @@ def daemon(config):
 
 def main():
     """ This is the entry point """
+
+    # Set the null handler to avoid complaining about no handler presents
     import galileo
     logging.getLogger(galileo.__name__).addHandler(logging.NullHandler())
 
@@ -260,11 +250,16 @@ def main():
 
     logger.debug("Configuration: %s", config)
 
+    ui = HardCodedUI(config.hardcoded_ui)
+
     try:
         {
             'version': version_mode,
             'sync': sync,
             'daemon': daemon,
+            'pair': Conversation('pair', ui),
+            'firmware': Conversation('firmware', ui),
+            'interactive': interactive.main,
         }[config.mode](config)
     except:
         print "# A serious error happened, which is probably due to a"
@@ -272,4 +267,9 @@ def main():
         print "# information on the galileo bug tracker:"
         print "#    https://bitbucket.org/benallard/galileo/issues/new"
         print '#', version(True, '\n# ')
+        if hasattr(dgl, 'log'):
+            print '# Last communications:'
+            for comm in dgl.log.getData():
+                dir, dat = comm
+                print '# %s %s' % ({dgl.IN: '<', dgl.OUT: '>'}.get(dir, '-'), a2x(dat or []))
         raise
