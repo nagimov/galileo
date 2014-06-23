@@ -1,6 +1,6 @@
 import unittest
 
-from galileo.utils import a2x, a2s, a2lsbi, a2msbi, i2lsba, s2a
+from galileo.utils import a2x, a2s, a2lsbi, a2msbi, i2lsba, s2a, x2a
 
 class testa2x(unittest.TestCase):
 
@@ -10,21 +10,16 @@ class testa2x(unittest.TestCase):
     def testNotShorten(self):
         self.assertEqual(a2x([0] * 5), '00 00 00 00 00')
 
-    def testShorten(self):
-        self.assertEqual(a2x([0] * 5, shorten=True), '00 (5 times)')
-
     def testDelim(self):
         self.assertEqual(a2x(range(190, 196), '|'), 'BE|BF|C0|C1|C2|C3')
 
-    def testDelimShortened(self):
-        self.assertEqual(a2x(range(190, 196) + [0] * 3, '|', shorten=True),
-                         'BE|BF|C0|C1|C2|C3|00 (3 times)')
 
-    def testDataRemainsUnchanged(self):
-        d = range(3) + [0] * 3
-        self.assertEqual(len(d), 6)
-        self.assertEqual(a2x(d, shorten=True), "00 01 02 00 (3 times)")
-        self.assertEqual(len(d), 6)
+class testx2a(unittest.TestCase):
+
+    def testSimple(self):
+        self.assertEqual(x2a('2'), [2])
+        self.assertEqual(x2a('02'), [2])
+        self.assertEqual(x2a('2 3'), [2, 3])
 
 class testa2s(unittest.TestCase):
 
@@ -33,12 +28,12 @@ class testa2s(unittest.TestCase):
 
     def testWithNUL(self):
         self.assertEqual(
-            a2s(range(ord('a'), ord('d')+1) + [0]*3 + range(ord('e'), ord('i')+1)),
+            a2s(list(range(ord('a'), ord('d')+1)) + [0]*3 + list(range(ord('e'), ord('i')+1))),
             'abcd')
 
     def testWithNULNotPrint(self):
         self.assertEqual(
-            a2s(range(ord('a'), ord('d')+1) + [0]*3 + range(ord('e'), ord('i')+1), False),
+            a2s(list(range(ord('a'), ord('d')+1)) + [0]*3 + list(range(ord('e'), ord('i')+1)), False),
             'abcd\0\0\0efghi')
 
 
@@ -108,9 +103,9 @@ class testi2lsba(unittest.TestCase):
 class tests2a(unittest.TestCase):
 
     def testSimple(self):
-        self.assertEqual(s2a('abcd'), range(ord('a'), ord('d')+1))
+        self.assertEqual(s2a('abcd'), list(range(ord('a'), ord('d')+1)))
 
     def testWithNUL(self):
         self.assertEqual(s2a('abcd\0\0\0efghi'),
-                         range(ord('a'), ord('d')+1) +
-                        [0] * 3 + range(ord('e'), ord('i') + 1))
+                         list(range(ord('a'), ord('d')+1)) +
+                        [0] * 3 + list(range(ord('e'), ord('i') + 1)))

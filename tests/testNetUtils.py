@@ -1,18 +1,23 @@
 import unittest
 
 import xml.etree.ElementTree as ET
-import StringIO
+try:
+    from StringIO import StringIO
+except ImportError:
+    # Python3
+    from io import StringIO
 
 from galileo.net import toXML, tuplesToXML, XMLToTuple
 
 class testtoXML(unittest.TestCase):
 
     def _testEqual(self, xml, xmlStr):
-        f = StringIO.StringIO()
         tree = ET.ElementTree(xml)
+        f = StringIO()
         tree.write(f)
         self.assertEqual(f.getvalue(), xmlStr)
-    
+        f.close()
+
     def testSimple(self):
         self._testEqual(toXML('elem'), '<elem />')
     def testSimpleWithAttrs(self):
@@ -61,7 +66,7 @@ class testtoTuple(unittest.TestCase):
 
     def testSimpleWithBody(self):
         self._testEqual('<e>b</e>', ('e', {}, [], 'b'))
-        
+
     def testSimpleWithChilds(self):
         self._testEqual('<p><c1 /><c2>b</c2></p>', ('p',
                                                     {},
