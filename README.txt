@@ -2,7 +2,7 @@ Galileo
 =======
 
 :author: Benoît Allard <benoit.allard@gmx.de>
-:version: 0.4.2
+:version: 0.5dev
 :license: LGPLv3+
 :bug tracker: https://bitbucket.org/benallard/galileo/issues
 :mailing list: galileo@freelists.org (subscribe_, archive_)
@@ -69,11 +69,28 @@ Distribution packages
 
 The following Linux distributions have packages available for installation:
 
+**Arch**:
+  The utility is available from AUR_. You can install it using the yaourt_ package manager: ``yaourt -S galileo``.
+**Fedora**:
+  The utility is packaged in a `COPR repo`_.  Download the relevant repo
+  for your version of Fedora, and then ``yum install galileo``.
 **Gentoo**:
   The utility is packaged as ``app-misc/galileo`` within the
   `squeezebox <http://git.overlays.gentoo.org/gitweb/?p=user/squeezebox.git>`_
   overlay. See https://wiki.gentoo.org/wiki/Layman for details of how
   to use Gentoo overlays.
+**Ubuntu**:
+  The utility is available over the ppa ``ppa:cwayne18/fitbit``. Use the
+  following commands to install it and start the daemon::
+
+    sudo add-apt-repository ppa:cwayne18/fitbit
+    sudo apt-get update && sudo apt-get install galileo
+    start galileo﻿
+
+.. _AUR: https://aur.archlinux.org/packages/galileo/
+.. _yaourt: https://wiki.archlinux.org/index.php/yaourt
+
+.. _`COPR repo`: https://copr.fedoraproject.org/coprs/stbenjam/galileo/
 
 The more complicated way
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -112,10 +129,12 @@ of the dump. Once this information reached a suffficient level of maturation,
 the goal is to integrate it into the project documentation. So head-on there,
 and start sharing your findings !
 
-Manual pages for the galileo(1) utility and the galileorc(5)
-configuration file are provided within the ``doc`` directory.
+Manual pages for the galileo_\(1) utility and the galileorc_\(5) configuration
+file are provided within the ``doc`` directory.
 
 .. _wiki: https://bitbucket.org/benallard/galileo/wiki
+.. _galileo: https://pythonhosted.org/galileo/galileo.1.html
+.. _galileorc: https://pythonhosted.org/galileo/galileorc.5.html
 
 Acknowledgements
 ----------------
