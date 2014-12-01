@@ -133,7 +133,7 @@ class LogLevelParameter(Parameter):
                               'verbose': logging.INFO,
                               'debug': logging.DEBUG}
         self.__logLevelMapReverse = {}
-        for key, value in self.__logLevelMap.iteritems():
+        for key, value in self.__logLevelMap.items():
             self.__logLevelMapReverse[value] = key
         self.default = logging.WARNING
 
@@ -176,9 +176,27 @@ class Argument(StrParameter):
 
     def toArgParse(self, parser):
         parser.add_argument(*self.paramName,
-                            nargs='?', choices=['version', 'sync', 'daemon'],
+                            nargs='?', choices=['version', 'sync', 'daemon',
+                                                'pair', 'firmware',
+                                                'interactive'],
                             help=self.helpText +
                             " (default to %s)" % self.default)
+
+
+class HardCodedUIConfig(Parameter):
+    """\
+    A Config parameter for the config of the HardCodedUI class
+    """
+    def __init__(self):
+        self.name = 'hardcoded-ui'
+        self.varName = self.name.replace('-', '_')
+        self.default = {}
+    def toArgParse(self, parser):
+        """ no-op """
+    def fromArgs(self, args, optdict):
+        """ no-op """
+    def fromFile(self, filedict, optdict):
+        optdict[self.varName] = filedict.get(self.name, {})
 
 
 class Config(object):
@@ -210,7 +228,9 @@ class Config(object):
                 BoolParameter('keepDumps', 'keep-dumps', ('dump',), True, False, "enable saving of the megadump to file"),
                 BoolParameter('doUpload', 'do-upload',  ('upload',), True, False, "upload the dump to the server"),
                 BoolParameter('httpsOnly', 'https-only', ('https-only',), True, False, "use http if https is not available"),
+                IntParameter('logSize', 'log-size', ('--log-size',), 10, False, "Amount of communication to display in case of error"),
                 Argument(),
+                HardCodedUIConfig(),
                 ]
         self.__opts = opts
         self.__optdict = {}
@@ -222,7 +242,6 @@ class Config(object):
     def __getattr__(self, name):
         """ Allow accessing the attributes as config.XXX """
         if name not in self.__optdict:
-            print self.__optdict.keys()
             raise AttributeError(name)
         return self.__optdict[name]
 
