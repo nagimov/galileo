@@ -2,7 +2,9 @@
 import base64
 import random
 import socket
-import StringIO
+
+from io import BytesIO
+
 
 import xml.etree.ElementTree as ET
 
@@ -77,6 +79,8 @@ class GalileoClient(object):
         self.host = host
         self.path = path
         self._port = port
+        self.server_state = None
+        self._version = None
 
     @property
     def port(self):
@@ -92,31 +96,41 @@ class GalileoClient(object):
             'port': self.port,
             'path': self.path}
 
+    @property
+    def version(self):
+        if self._version is not None:
+            # We're not completely lying ;)
+            return self._version + ' (really: %s)' % __version__
+        return __version__
+
     def post(self, mode, dongle=None, data=None):
         client = toXML('galileo-client', {'version': "2.0"})
         info = toXML('client-info', childs=[
             ('client-id', {}, [], self.ID),
-            ('client-version', {}, [], __version__),
+            ('client-version', {}, [], self.version),
             ('client-mode', {}, [], mode)])
-        if (dongle is not None) and dongle.hasInfo:
+        if (dongle is not None) and dongle.hasVersion:
             info.append(toXML(
                 'dongle-version',
                 {'major': str(dongle.major),
                  'minor': str(dongle.minor)}))
         client.append(info)
+        if self.server_state is not None:
+            client.append(toXML('server-state', body=self.server_state))
         if data is not None:
             for XMLElem in tuplesToXML(data):
                 client.append(XMLElem)
 
-        f = StringIO.StringIO()
+        f = BytesIO()
 
         tree = ET.ElementTree(client)
-        tree.write(f, "UTF-8")
+        tree.write(f, "utf-8", xml_declaration=True)
 
         logger.debug('HTTP POST=%s', f.getvalue())
         r = requests.post(self.url,
                           data=f.getvalue(),
                           headers={"Content-Type": "text/xml"})
+        f.close()
         r.raise_for_status()
 
         try:
@@ -126,14 +140,14 @@ class GalileoClient(object):
 
         logger.debug('HTTP response=%s', answer)
 
-        tag, attrib, childs, body = XMLToTuple(ET.fromstring(answer))
+        tag, attrib, childs, body = XMLToTuple(ET.fromstring(
+            answer.encode('utf-8')))
 
         if tag != 'galileo-server':
             logger.error("Unexpected root element: %s", tag)
 
         if attrib['version'] != "2.0":
-            logger.error("Unexpected server version: %s",
-                         attrib['version'])
+            logger.warning("Unexpected server version: %s", attrib['version'])
 
         for child in childs:
             stag, _, schilds, sbody = child
@@ -147,13 +161,22 @@ class GalileoClient(object):
                     if sstag == 'min': minD = int(ssbody)
                     if sstag == 'max': maxD = int(ssbody)
                 raise BackOffException(minD, maxD)
+            elif stag == 'server-state':
+                self.server_state = sbody
+            elif stag == 'redirect':
+                for schild in schilds:
+                    sstag, _, _, ssbody = schild
+                    if sstag == 'protocol': self.scheme = ssbody
+                    if sstag == 'host': self.host = ssbody
+                    if sstag == 'port': self._port = int(ssbody)
+                logger.info('Found redirect to %s' % self.url)
 
         return childs
 
     def requestStatus(self, allowHTTP=False):
         try:
             self.post('status')
-        except requests.exceptions.ConnectionError, ce:
+        except requests.exceptions.ConnectionError as ce:
             error_msg = ConnectionErrorToMessage(ce)
             # No internet connection or fitbit server down
             logger.error("Not able to connect to the Fitbit server using %s:"
@@ -172,7 +195,7 @@ class GalileoClient(object):
         self.scheme = 'http'
         try:
             self.post('status')
-        except requests.exceptions.ConnectionError, ce:
+        except requests.exceptions.ConnectionError as ce:
             error_msg = ConnectionErrorToMessage(ce)
             # No internet connection or fitbit server down
             logger.error("Not able to connect to the Fitbit server using"
@@ -188,7 +211,7 @@ class GalileoClient(object):
             server = self.post('sync', dongle, (
                 'tracker', {'tracker-id': trackerId}, (
                     'data', {}, [], megadump.toBase64())))
-        except requests.exceptions.ConnectionError, ce:
+        except requests.exceptions.ConnectionError as ce:
             error_msg = ConnectionErrorToMessage(ce)
             raise SyncError('ConnectionError: %s' % error_msg)
 
