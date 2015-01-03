@@ -4,7 +4,7 @@
 .\"   groff -man -Tascii galileorc.5
 .\" or
 .\"   man ./galileorc.5
-.TH galileorc 5 "March 2014" 0.4.3 "File Formats Manual"
+.TH galileorc 5 "June 2014" 0.5dev "File Formats Manual"
 
 .SH NAME
 galileorc \- configuration files for the galileo Fitbit synchronization
@@ -76,6 +76,10 @@ display progress during synchronization, \fBdebug\fR for more
 detailed information useful for diagnosing problems, or \fBquiet\fR to
 display only a warning and error messages.
 .TP
+.B syslog
+setting this to \fBtrue\fR will send all logging output to the syslog
+facility.
+.TP
 .B include
 the list of tracker IDs to synchronize. If this is specified then only
 trackers from this list will be synchronised.
@@ -107,6 +111,10 @@ data to the Fitbit web service.
 setting this to \fBfalse\fR will allow galileo to fallback to
 unencrypted HTTP if HTTPS fails for sending tracker data to the Fitbit
 web service.
+.TP
+.B hardcoded-ui
+This is a structured section that includes the answers needed during the
+pairing/firmware update process.
 
 .SH EXAMPLE
 The following is an example configuration file:

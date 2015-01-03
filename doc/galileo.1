@@ -4,7 +4,7 @@
 .\"   groff -man -Tascii galileo.1
 .\" or
 .\"   man ./galileo.1
-.TH galileo  1  "March 2014" 0.4.3 "User Commands"
+.TH galileo  1  "June 2014" 0.5dev "User Commands"
 .SH NAME
 galileo \- synchronize Fitbit devices
 
@@ -21,6 +21,8 @@ galileo \- synchronize Fitbit devices
 .RB [ "\-\-dump" | "\-\-no\-dump" ]
 .RB [ "\-\-upload" | "\-\-no\-upload" ]
 .RB [ "\-\-https\-only" | "\-\-no\-https\-only" ]
+.RB [ "\-\-log\-size \fISIZE\fR" ]
+.RB [ "\-\-syslog" | "\-\-no\-syslog" ]
 .RB [ "sync" | "daemon" | "version" ]
 
 .SH DESCRIPTION
@@ -48,6 +50,22 @@ option.
 Display the
 .B galileo
 version and exit.
+.TP
+.B interactive
+This spawn an interactive shell to allow sending arbitrary commands to
+the dongle and the tracker. This is meant to allow experimenting with
+new commands, or different command orders. To be used by experts
+only.
+.TP
+.B pair
+This mode, in an experimental state, allow you to link your tracker with your
+Fitbit online account. This is needed before being able to use any new tracker.
+In order to use this mode, you need an account in the Fitbit online platform,
+and a tracker. The parameters for this mode are taken from the
+.B hardcoded-ui
+section of the
+.BR galileorc (5)
+file.
 
 .SH OPTIONS
 .TP
@@ -78,6 +96,12 @@ diagnosing problems.
 .BR \-q ", " \-\-quiet
 show no output except for errors and a summary. This is the default
 if no other logging options are specified.
+.TP
+.BR \-\-syslog
+send logging output to the syslog facility.
+.TP
+.BR \-\-no\-syslog
+send logging output to stderr.
 .SS Synchronization control options:
 .TP
 \fB\-I\fR \fIID\fR [\fIID\fR ...], \
@@ -125,7 +149,7 @@ default.
 .B \-\-no\-upload
 prevent the uploading of tracker data to the Fitbit web service. Data
 is not deleted from trackers until it is acknowledged by the fitbit server
- so this will not result in data loss.
+so this will not result in data loss.
 .TP
 .B \-\-https\-only
 data sent to the Fitbit web service will be transferred via a secure connection
@@ -135,6 +159,13 @@ using HTTPS. This is the default.
 if HTTPS connection is not possible, this will allow the fallback to HTTP.
 This should only be required if problems with encryption libraries prevent
 data transfer without this option.
+.TP
+.BI \-\-log\-size " SIZE"
+indicate the amount of communication that should be displayed in case of
+errors. Galileo will keep in memory the last \fISIZE\fR communications to help
+debugging if an error happen. This is particularly useful in case of
+hard-to-reproduce issues, where it is too late to collect debug information.
+Default to 10. Set to 0 to disable this functionality.
 
 .SH REQUIREMENTS
 An original Fitbit Bluetooth-LE USB synchronization dongle is
@@ -165,13 +196,6 @@ Written and maintained by Benoît Allard, with contributions from other
 authors.
 
 .SH BUGS
-.B galileo
-doesn't currently support linking (pairing) trackers with the Fitbit
-web service account. Before a new tracker can be synchronized it must
-first be linked to your Fitbit account using another method such as a
-Fitbit mobile or tablet app, or the official Fitbit Windows or
-Macintosh desktop clients.
-.PP
 There are no current facilities to make use of the data stored with
 the \fB\-\-dump\fR command.
 .PP
