@@ -43,10 +43,6 @@ class CheckVersion(Command):
 with open('README.txt') as file:
     long_description = file.read()
 
-extra = {}
-if sys.version_info >= (3,):
-    extra['use_2to3'] = True
-
 setup(
     name="galileo",
     version=__version__,
@@ -71,7 +67,9 @@ setup(
         'Topic :: Utilities',
         'Topic :: Internet',
         'Operating System :: OS Independent',
-        'Programming Language :: Python',
+        'Programming Language :: Python :: 2',
+        'Programming Language :: Python :: 2.6',
+        'Programming Language :: Python :: 2.7',
     ],
     packages=find_packages(exclude=["tests"]),
     entry_points={
@@ -82,5 +80,4 @@ setup(
     cmdclass={
         'checkversion': CheckVersion,
     },
-    **extra
 )

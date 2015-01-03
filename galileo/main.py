@@ -1,41 +1,34 @@
+from __future__ import print_function
+
 import datetime
 import os
 import sys
 import time
 import uuid
 
-try:
-    from logging import NullHandler
-except ImportError:
-    from logging import Handler
-
-    class NullHandler(Handler):
-        def emit(self, record):
-            pass
-
 import logging
+import logging.handlers
 logger = logging.getLogger(__name__)
 
 import requests
 
 from . import __version__
 from .config import Config
-from .dongle import (
-    FitBitDongle, TimeoutError, NoDongleException, PermissionDeniedException
-)
+from .conversation import Conversation
 from .net import GalileoClient, SyncError, BackOffException
 from .tracker import FitbitClient
+from .ui import InteractiveUI
 from .utils import a2x
+from . import dongle as dgl
+from . import interactive
 
 FitBitUUID = uuid.UUID('{ADAB0000-6E7D-4601-BDA2-BFFAA68956BA}')
 
 
 def syncAllTrackers(config):
     logger.debug('%s initialising', os.path.basename(sys.argv[0]))
-    dongle = FitBitDongle()
-    try:
-        dongle.setup()
-    except NoDongleException:
+    dongle = dgl.FitBitDongle(config.logSize)
+    if not dongle.setup():
         logger.error("No dongle connected, aborting")
         return
 
@@ -46,14 +39,12 @@ def syncAllTrackers(config):
 
     fitbit.disconnect()
 
-    fitbit.getDongleInfo()
+    if not fitbit.getDongleInfo():
+        logger.warning('Failed to get connected Fitbit dongle information')
 
     logger.info('Discovering trackers to synchronize')
-    try:
-        trackers = [t for t in fitbit.discover(FitBitUUID)]
-    except TimeoutError:
-        logger.debug('Timeout trying to discover trackers')
-        trackers = []
+
+    trackers = [t for t in fitbit.discover(FitBitUUID)]
 
     logger.info('%d trackers discovered', len(trackers))
     for tracker in trackers:
@@ -72,21 +63,18 @@ def syncAllTrackers(config):
 
         logger.info('Attempting to synchronize tracker %s', trackerid)
 
-        logger.debug('Connecting to Fitbit server and requesting status')
-        if not galileo.requestStatus(not config.httpsOnly):
-            yield tracker
-            break
+        if config.doUpload:
+            logger.debug('Connecting to Fitbit server and requesting status')
+            if not galileo.requestStatus(not config.httpsOnly):
+                yield tracker
+                break
 
         logger.debug('Establishing link with tracker')
-        try:
-            fitbit.establishLink(tracker)
-            fitbit.toggleTxPipe(True)
-            fitbit.initializeAirlink()
-        except TimeoutError:
-            logger.debug('Timeout while trying to establish link with tracker')
+        if not (fitbit.establishLink(tracker) and fitbit.toggleTxPipe(True)
+                and fitbit.initializeAirlink(tracker)):
             logger.warning('Unable to connect with tracker %s. Skipping',
                            trackerid)
-            tracker.status = 'Unable to establish a connection (timeout).'
+            tracker.status = 'Unable to establish a connection.'
             yield tracker
             continue
 
@@ -94,11 +82,10 @@ def syncAllTrackers(config):
         #time.sleep(5)
 
         logger.info('Getting data from tracker')
-        try:
-            dump = fitbit.getDump()
-        except TimeoutError:
-            logger.error("Timeout downloading the dump from tracker")
-            tracker.status = "Failed to download the dump (timeout)"
+        dump = fitbit.getDump()
+        if dump is None:
+            logger.error("Error downloading the dump from tracker")
+            tracker.status = "Failed to download the dump"
             yield tracker
             continue
 
@@ -121,7 +108,7 @@ def syncAllTrackers(config):
         else:
             logger.info('Sending tracker data to Fitbit')
             try:
-                response = galileo.sync(fitbit, trackerid, dump)
+                response = galileo.sync(fitbit.dongle, trackerid, dump)
 
                 if config.keepDumps:
                     logger.debug("Appending answer from server to %s",
@@ -137,24 +124,21 @@ def syncAllTrackers(config):
                 logger.info('Successfully sent tracker data to Fitbit')
 
                 logger.info('Passing Fitbit response to tracker')
-                try:
-                    fitbit.uploadResponse(response)
-                except TimeoutError:
-                    logger.warning("Timeout error while trying to give Fitbit"
-                                   " response to tracker %s", trackerid)
-                tracker.status = "Synchronisation sucessfull"
+                if not fitbit.uploadResponse(response):
+                    logger.warning("Error while trying to give Fitbit response"
+                                   " to tracker %s", trackerid)
+                    tracker.status = "Failed to upload fitbit response to tracker"
+                else:
+                    tracker.status = "Synchronisation successful"
 
-            except SyncError, e:
+            except SyncError as e:
                 logger.error("Fitbit server refused data from tracker %s,"
                              " reason: %s", trackerid, e.errorstring)
                 tracker.status = "Synchronisation failed: %s" % e.errorstring
 
         logger.debug('Disconnecting from tracker')
-        try:
-            fitbit.toggleTxPipe(False)
-            fitbit.terminateAirlink()
-        except TimeoutError:
-            logger.warning('Timeout while disconnecting from tracker %s',
+        if not (fitbit.terminateAirlink() and fitbit.toggleTxPipe(False) and fitbit.ceaseLink()):
+            logger.warning('Error while disconnecting from tracker %s',
                            trackerid)
             tracker.status += " (Error disconnecting)"
         yield tracker
@@ -168,7 +152,7 @@ fitbit dongle. In order to do so, as root, create the file
 SUBSYSTEM=="usb", ATTR{idVendor}=="%(VID)x", ATTR{idProduct}=="%(PID)x", SYMLINK+="fitbit", MODE="0666"
 
 The dongle must then be removed and reinserted to receive the new permissions.""" % {
-    'VID': FitBitDongle.VID, 'PID': FitBitDongle.PID}
+    'VID': dgl.FitBitDongle.VID, 'PID': dgl.FitBitDongle.PID}
 
 
 def version(verbose, delim='\n'):
@@ -197,7 +181,7 @@ def version(verbose, delim='\n'):
 
 
 def version_mode(config):
-    print version(config.logLevel in (logging.INFO, logging.DEBUG))
+    print(version(config.logLevel in (logging.INFO, logging.DEBUG)))
 
 
 def sync(config):
@@ -206,17 +190,17 @@ def sync(config):
         for tracker in syncAllTrackers(config):
             statuses.append("Tracker: %s: %s" % (a2x(tracker.id, ''),
                                                  tracker.status))
-    except BackOffException, boe:
-        print "The server requested that we come back between %d and %d"\
-            " minutes." % (boe.min / 60*1000, boe.max / 60*1000)
+    except BackOffException as boe:
+        print("The server requested that we come back between %d and %d"\
+            " minutes." % (boe.min / 60*1000, boe.max / 60*1000))
         later = datetime.datetime.now() + datetime.timedelta(
             microseconds=boe.getAValue()*1000)
-        print "I suggest waiting until %s" % later
+        print("I suggest waiting until %s" % later)
         return
-    except PermissionDeniedException:
-        print PERMISSION_DENIED_HELP
+    except dgl.PermissionDeniedException:
+        print(PERMISSION_DENIED_HELP)
         return
-    print '\n'.join(statuses)
+    print('\n'.join(statuses))
 
 
 def daemon(config):
@@ -228,7 +212,7 @@ def daemon(config):
                 for tracker in syncAllTrackers(config):
                     logger.info("Tracker %s: %s" % (a2x(tracker.id, ''),
                                                     tracker.status))
-            except BackOffException, boe:
+            except BackOffException as boe:
                 logger.warning("Received a back-off notice from the server,"
                                " waiting for a bit longer.")
                 time.sleep(boe.getAValue() / 1000.)
@@ -237,14 +221,16 @@ def daemon(config):
                             config.daemonPeriod / 1000)
                 time.sleep(config.daemonPeriod / 1000.)
         except KeyboardInterrupt:
-            print "Ctrl-C, caught, stopping ..."
+            print("Ctrl-C, caught, stopping ...")
             goOn = False
 
 
 def main():
     """ This is the entry point """
+
+    # Set the null handler to avoid complaining about no handler presents
     import galileo
-    logging.getLogger(galileo.__name__).addHandler(NullHandler())
+    logging.getLogger(galileo.__name__).addHandler(logging.NullHandler())
 
     config = Config()
 
@@ -256,28 +242,52 @@ def main():
 
     if config.rcConfigName:
         config.load(config.rcConfigName)
-        # We need to apply our arguments as last
+        # We need to re-apply our arguments as last
         config.applyArgs()
 
     # --- All logging actions before this line are not active ---
     # This means that the whole Config parsing is not logged because we don't
     # know which logLevel we should use.
-    logging.basicConfig(format='%(asctime)s:%(levelname)s: %(message)s',
-                        level=config.logLevel)
+    if config.syslog:
+        # Syslog messages must have the time/name first.
+        format = ('%(asctime)s ' + galileo.__name__ + ': '
+                  '%(levelname)s: %(module)s: %(message)s')
+        # TODO: Make address into a config option.
+        handler = logging.handlers.SysLogHandler(
+            address='/dev/log',
+            facility=logging.handlers.SysLogHandler.LOG_DAEMON)
+        handler.setFormatter(logging.Formatter(fmt=format))
+        core_logger = logging.getLogger(galileo.__name__)
+        core_logger.handlers = []
+        core_logger.addHandler(handler)
+        core_logger.setLevel(config.logLevel)
+    else:
+        format = '%(asctime)s:%(levelname)s: %(message)s'
+        logging.basicConfig(format=format, level=config.logLevel)
     # --- All logger actions from now on will be effective ---
 
     logger.debug("Configuration: %s", config)
+
+    ui = InteractiveUI(config.hardcoded_ui)
 
     try:
         {
             'version': version_mode,
             'sync': sync,
             'daemon': daemon,
+            'pair': Conversation('pair', ui),
+            'firmware': Conversation('firmware', ui),
+            'interactive': interactive.main,
         }[config.mode](config)
     except:
-        print "# A serious error happened, which is probably due to a"
-        print "# programming error. Please open a new issue with the following"
-        print "# information on the galileo bug tracker:"
-        print "#    https://bitbucket.org/benallard/galileo/issues/new"
-        print '#', version(True, '\n# ')
+        print("# A serious error happened, which is probably due to a")
+        print("# programming error. Please open a new issue with the following")
+        print("# information on the galileo bug tracker:")
+        print("#    https://bitbucket.org/benallard/galileo/issues/new")
+        print('#', version(True, '\n# '))
+        if hasattr(dgl, 'log'):
+            print('# Last communications:')
+            for comm in dgl.log.getData():
+                dir, dat = comm
+                print('# %s %s' % ({dgl.IN: '<', dgl.OUT: '>'}.get(dir, '-'), a2x(dat or [])))
         raise
