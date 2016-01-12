@@ -126,8 +126,9 @@ class FitbitClient(object):
             # Give the dongle 100ms margin
             d = self.dongle.ctrl_read(minDuration + 100)
             if d is None: break
-            elif isStatus(d, 'StartDiscovery', False):
+            elif isStatus(d, None, False):
                 # We know this can happen almost any time during 'discovery'
+                logger.info('Ignoring message: %s' % a2s(d.payload))
                 continue
             elif d.INS == 2:
                 # Last instruction of a discovery sequence has INS==1
