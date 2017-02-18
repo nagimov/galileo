@@ -9,6 +9,7 @@ try:
 except ImportError:
     from . import parser as yaml
 
+from . import net
 from .utils import a2x
 
 class ConfigError(Exception): pass
@@ -117,6 +118,7 @@ class BoolParameter(Parameter):
 
 
 class SetParameter(Parameter):
+    """ This parameter regroups multiple values under a `set` """
     def toArgParse(self, parser):
         parser.add_argument(*self.paramName,
                             nargs="+", metavar="ID", dest=self.name,
@@ -221,6 +223,45 @@ class HardCodedUIConfig(Parameter):
         return True
 
 
+def all_subclasses(cls):
+    """ generator that returns all the known subtypes of the given type """
+    for s in cls.__subclasses__():
+        yield s
+        for ss in all_subclasses(s):
+            yield ss
+
+
+class ClassChooserParameter(Parameter):
+    """ Allow to choose between the subclasses of a class """
+    def __init__(self, klassType, *args, **kwargs):
+        Parameter.__init__(self, *args, **kwargs)
+        self.mapping = {}
+        for kls in all_subclasses(klassType):
+            self.mapping[kls.__name__] = kls
+
+    def toArgParse(self, parser):
+        parser.add_argument(*self.paramName,
+                            dest=self.name, choices=self.mapping.keys(),
+                            help=self.helpText +
+                            " (default to %s)" % self.default)
+
+    def fromArgs(self, args, optdict):
+        """ Take the value from the args parameter (from 'argparse'), and fill
+        it in the dict """
+        val = getattr(args, self.name)
+        if val:
+            optdict[self.varName] = self.mapping[val]
+
+    def fromFile(self, filedict, optdict):
+        """ Take the value from the filedict parameter and fill it in the dict
+        :returns: False if something went wrong
+        """
+        if self.paramOnly: return True
+        if self.name in filedict:
+            optdict[self.varName] = self.mapping[filedict[self.name]]
+        return True
+
+
 class Config(object):
     """Class holding the configuration to be applied during synchronization.
     The configuration can be loaded from a file in which case the defaults
@@ -243,13 +284,14 @@ class Config(object):
             opts = [
                 StrParameter('rcConfigName', 'rcconfigname', ('-c', '--config'), None, True, "use alternative configuration file"),
                 StrParameter('dumpDir', 'dump-dir', ('--dump-dir',), "~/.galileo", False, "directory for storing dumps"),
-                IntParameter('daemonPeriod', 'daemon-period', ('--daemon-period',), 15000, False, "sleep time in msec between sync runs when in daemon mode"),
+                IntParameter('daemonPeriod', 'daemon-period', ('--daemon-period',), 180000, False, "sleep time in msec between sync runs when in daemon mode"),
                 SetParameter('includeTrackers', 'include', ('-I', '--include'), None, False, "list of tracker IDs to sync (all if not specified)"),
                 SetParameter('excludeTrackers', 'exclude', ('-X', '--exclude'), set(), False, "list of tracker IDs to not sync"),
                 LogLevelParameter(),
                 BoolParameter('forceSync', 'force-sync', ('force',), False, False, "synchronize even if tracker reports a recent sync"),
                 BoolParameter('keepDumps', 'keep-dumps', ('dump',), True, False, "enable saving of the megadump to file"),
-                BoolParameter('doUpload', 'do-upload',  ('upload',), True, False, "upload the dump to the server"),
+                BoolParameter('doUpload', 'do-upload',  ('upload',), True, False, "upload the dump to the database"),
+                ClassChooserParameter(net.Database, 'database', 'database', ('--db', '--database'), net.RemoteXMLDatabase, False, "database to use for synchronisation"),
                 BoolParameter('httpsOnly', 'https-only', ('https-only',), True, False, "use http if https is not available"),
                 StrParameter('fitbitServer', 'fitbit-server', ('-s', '--fitbit-server',), "client.fitbit.com", False, "server used for synchronisation"),
                 IntParameter('logSize', 'log-size', ('--log-size',), 10, False, "Amount of communication to display in case of error"),
