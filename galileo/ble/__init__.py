@@ -1,7 +1,7 @@
 import logging
 logger = logging.getLogger(__name__)
 
-from ..dump import Dump, DumpResponse, MEGADUMP
+from ..dump import Dump, DumpResponse, MEGADUMP, CRC16
 from ..utils import a2x, i2lsba, a2lsbi
 
 class API(object):
@@ -11,7 +11,7 @@ class API(object):
         pass
     def getHardwareInfo(self):
         pass
-    def discover(self, UUID):
+    def discover(self, UUID, service1, read, write, minRSSI, timeout):
         raise NotImplementedError
     def connect(self, tracker):
         raise NotImplementedError
@@ -20,6 +20,8 @@ class API(object):
     def _writeData(self, dm):
         raise NotImplementedError
     def _readData(self, timeout=0):
+        raise NotImplementedError
+    def info(self):
         raise NotImplementedError
 
 
@@ -41,7 +43,7 @@ class API(object):
             logger.error("Wrong header: %s", a2x(d.data[:2]))
             return False
         if (tracker is not None) and (d.data[6:12] != tracker._id):
-            logger.error("Connected to wrong tracker: %s", a2x(d.data[6:12]))
+            logger.error("Connected to wrong tracker: %r != %r", d.data[6:12], tracker._id)
             return False
         logger.debug("Connection established: %d, %d",
                      a2lsbi(d.data[2:4]), a2lsbi(d.data[4:6]))
@@ -54,7 +56,7 @@ class API(object):
         r = self._readData()
         return (r is not None) and (r.data == bytearray([0xc0, 2]))
 
-    def getDump(self, dumptype=MEGADUMP):
+    def getDump(self, dumptype):
         """ :returns: a `Dump` object or None """
         logger.debug('Getting dump type %d', dumptype)
 
@@ -85,14 +87,20 @@ class API(object):
                      dump.esc[1])
         return dump
 
-    def uploadResponse(self, response):
-        """ 4 and 6 are magic values here ...
+    def _uploadResponse(self, response, fastAirlink):
+        """
         :returns: a boolean about the success of the operation.
         """
         dumptype = 4  # ???
-        self._writeData(DM([0xc0, 0x24, dumptype] + i2lsba(len(response), 6)))
-        d = self.data_read()
-        if d != DM([0xc0, 0x12, dumptype, 0, 0]):
+        crc = CRC16()
+        crc.update(response)
+        extension  = []
+        if fastAirlink:
+            # Seems like adding a 0 indicate fastAirlink.
+            extension = [0]
+        self._writeData(DM([0xc0, 0x24, dumptype] + i2lsba(len(response), 4) + i2lsba(crc.final(), 2) + extension))
+        d = self._readData()
+        if d != DM([0xc0, 0x12, dumptype, 0, 0] + extension):
             logger.error("Tracker did not acknowledged upload type: %s", d)
             return False
 
@@ -102,11 +110,12 @@ class API(object):
         for i, chunk in enumerate(response):#range(0, len(response), CHUNK_LEN):
             self._writeData(DM(chunk))
             # This one can also take some time (Charge HR tracker)
-            d = self._readData(20000)
-            expected = DM([0xc0, 0x13, (((i+1) % 16) << 4) + dumptype, 0, 0])
-            if d != expected:
-                logger.error("Wrong sequence number: %s, expected: %s", d, expected)
-                return False
+            if not fastAirlink:
+                d = self._readData(20000)
+                expected = DM([0xc0, 0x13, (((i+1) % 16) << 4) + dumptype, 0, 0])
+                if d != expected:
+                    logger.error("Wrong sequence number: %s, expected: %s", d, expected)
+                    return False
 
         self._writeData(DM([0xc0, 2]))
         # Next one can be very long. He is probably erasing the memory there
