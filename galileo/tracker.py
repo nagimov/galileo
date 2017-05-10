@@ -10,34 +10,14 @@ from .dongle import CM, isStatus
 from .utils import a2s, a2x, i2lsba, a2lsbi
 
 class Tracker(object):
-    def __init__(self, id):
+    def __init__(self, id, serviceData):
         self._id = id
+        self.serviceData = serviceData
         self.status = 'unknown'  # If we happen to read it before anyone set it
 
     @property
     def id(self):
         return a2x(self._id, delim="")
-
-    @property
-    def syncedRecently(self):
-        return False
-
-class FBTracker(Tracker):
-    """ The tracker that get used by the Fitbit dongle implementation """
-    def __init__(self, Id, addrType, serviceData, RSSI, serviceUUID=None):
-        Tracker.__init__(self, Id)
-        self.addrType = addrType
-        if serviceUUID is None:
-            self.serviceUUID = a2lsbi([Id[1] ^ Id[3] ^ Id[5],
-                                       Id[0] ^ Id[2] ^ Id[4]])
-        else:
-            self.serviceUUID = serviceUUID
-        self.serviceData = serviceData
-        # following three are coded somewhere here ...
-        # specialMode
-        # canDisplayNumber
-        # colorCode
-        self.RSSI = RSSI
 
     @property
     def productId(self):
@@ -47,13 +27,29 @@ class FBTracker(Tracker):
     def syncedRecently(self):
         return self.serviceData[1] != 4
 
+class FBTracker(Tracker):
+    """ The tracker that get used by the Fitbit dongle implementation """
+    def __init__(self, Id, addrType, serviceData, RSSI, serviceUUID=None):
+        Tracker.__init__(self, Id, serviceData)
+        self.addrType = addrType
+        if serviceUUID is None:
+            self.serviceUUID = a2lsbi([Id[1] ^ Id[3] ^ Id[5],
+                                       Id[0] ^ Id[2] ^ Id[4]])
+        else:
+            self.serviceUUID = serviceUUID
+        # following three are coded somewhere here ...
+        # specialMode
+        # canDisplayNumber
+        # colorCode
+        self.RSSI = RSSI
+
     @classmethod
     def fromDiscovery(klass, data, minRSSI=-255):
         trackerId = bytearray(data[:6])
         addrType = data[6]
         RSSI = c_byte(data[7]).value
         serviceDataLen = data[8]
-        serviceData = data[9:9+serviceDataLen+1]  # '+1': go figure !
+        serviceData = data[9:9+serviceDataLen]
         sUUID = a2lsbi(data[15:17])
         serviceUUID = a2lsbi([trackerId[1] ^ trackerId[3] ^ trackerId[5],
                               trackerId[0] ^ trackerId[2] ^ trackerId[4]])
@@ -116,8 +112,7 @@ class FitbitClient(dongle.FitBitDongle, ble.API):
 #        self.revision = d.payload[19]
         return True
 
-    def discover(self, uuid, service1=0xfb00, write=0xfb01, read=0xfb02,
-                 minRSSI=-255, minDuration=4000):
+    def discover(self, uuid, service1, read, write, minRSSI, timeout):
         """\
         The uuid is a mask on the service (characteristics ?) we understand
         service1 parameter is unused (at lease for the 'One')
@@ -127,13 +122,13 @@ class FitbitClient(dongle.FitBitDongle, ble.API):
         logger.debug('Discovering for UUID %s: %s', uuid,
                      ', '.join(hex(s) for s in (service1, write, read)))
         data = i2lsba(uuid.int, 16)
-        for i in (service1, write, read, minDuration):
+        for i in (service1, write, read, timeout):
             data += i2lsba(i, 2)
         self.ctrl_write(CM(4, data))
         amount = 0
         while True:
             # Give the dongle 100ms margin
-            d = self.ctrl_read(minDuration + 100)
+            d = self.ctrl_read(timeout + 100)
             if d is None: break
             elif isStatus(d, None, False):
                 # We know this can happen almost any time during 'discovery'
@@ -253,6 +248,9 @@ class FitbitClient(dongle.FitBitDongle, ble.API):
         self.ctrl_write(CM(8, [int(on)]))
         d = self.data_read(5000)
         return d == DM([0xc0, 0xb])
+
+    def uploadResponse(self, response):
+        return self._uploadResponse(response, False)
 
     def disconnect(self, tracker):
         if not self._terminateAirlink():

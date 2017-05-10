@@ -16,8 +16,8 @@ from . import __version__
 from .config import Config, ConfigError
 from .conversation import Conversation
 from .databases import SyncError
+from .dump import MEGADUMP
 from .netUtils import BackOffException
-from .tracker import FitbitClient
 from .ui import InteractiveUI
 from .utils import a2x
 from . import dongle as dgl
@@ -45,7 +45,7 @@ def syncAllTrackers(config):
 
     logger.info('Discovering trackers to synchronize')
 
-    trackers = [t for t in fitbit.discover(FitBitUUID)]
+    trackers = [t for t in fitbit.discover(FitBitUUID, 0xfb00, 0xfb01, 0xfb02, -255, 4000)]
 
     logger.info('%d trackers discovered', len(trackers))
     for tracker in trackers:
@@ -71,6 +71,7 @@ def syncAllTrackers(config):
         if not fitbit.connect(tracker):
             logger.warning('Unable to connect with tracker %s. Skipping',
                            tracker.id)
+            fitbit.disconnect(tracker)
             tracker.status = 'Unable to establish a connection.'
             yield tracker
             continue
@@ -79,9 +80,10 @@ def syncAllTrackers(config):
         #time.sleep(5)
 
         logger.info('Getting data from tracker')
-        dump = fitbit.getDump()
+        dump = fitbit.getDump(MEGADUMP)
         if dump is None:
             logger.error("Error downloading the dump from tracker")
+            fitbit.disconnect(tracker)
             tracker.status = "Failed to download the dump"
             yield tracker
             continue
