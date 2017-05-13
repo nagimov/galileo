@@ -1,6 +1,6 @@
 import unittest
 
-from galileo.utils import a2x, a2s, a2lsbi, a2msbi, i2lsba, s2a, x2a
+from galileo.utils import a2x, a2s, a2lsbi, a2msbi, i2lsba, i2msba, s2a, x2a
 
 class testa2x(unittest.TestCase):
 
@@ -20,6 +20,10 @@ class testx2a(unittest.TestCase):
         self.assertEqual(x2a('2'), [2])
         self.assertEqual(x2a('02'), [2])
         self.assertEqual(x2a('2 3'), [2, 3])
+
+    def testMultipleLines(self):
+        self.assertEqual(x2a('00\n01\n02\n03'), [0, 1, 2, 3])
+        self.assertEqual(x2a('00 01\n02 03'), [0, 1, 2, 3])
 
 class testa2s(unittest.TestCase):
 
@@ -98,6 +102,27 @@ class testi2lsba(unittest.TestCase):
         self.assertEqual(i2lsba(0x100, 2), [0, 1])
         self.assertEqual(i2lsba(0xff00, 2), [0, 0xff])
         self.assertEqual(i2lsba(0x8000, 2), [0, 0x80])
+
+
+class testi2msba(unittest.TestCase):
+
+    def test0(self):
+        self.assertEqual(i2msba(0, 1), bytearray(1))
+        self.assertEqual(i2msba(0, 3), bytearray(3))
+        self.assertEqual(i2msba(0, 5), bytearray(5))
+
+    def test1byte(self):
+        self.assertEqual(i2msba(1, 1), bytearray([1]))
+        self.assertEqual(i2msba(0xff, 1), bytearray([0xff]))
+        self.assertEqual(i2msba(0x80, 1), bytearray([0x80]))
+
+    def test2bytes(self):
+        self.assertEqual(i2msba(1, 2), bytearray([0, 1]))
+        self.assertEqual(i2msba(0xff, 2), bytearray([0, 0xff]))
+        self.assertEqual(i2msba(0x80, 2), bytearray([0, 0x80]))
+        self.assertEqual(i2msba(0x100, 2), bytearray([1, 0]))
+        self.assertEqual(i2msba(0xff00, 2), bytearray([0xff, 0]))
+        self.assertEqual(i2msba(0x8000, 2), bytearray([0x80, 0]))
 
 
 class tests2a(unittest.TestCase):

@@ -9,7 +9,13 @@ try:
 except ImportError:
     from . import parser as yaml
 
-from .utils import a2x
+from . import ble  # ble.API
+# the various ble implementations
+from .ble import pydbus
+from . import tracker
+from . import databases  # Database
+# Load the various database implementations
+from .databases import local, rest, xml
 
 class ConfigError(Exception): pass
 
@@ -117,6 +123,7 @@ class BoolParameter(Parameter):
 
 
 class SetParameter(Parameter):
+    """ This parameter regroups multiple values under a `set` """
     def toArgParse(self, parser):
         parser.add_argument(*self.paramName,
                             nargs="+", metavar="ID", dest=self.name,
@@ -221,6 +228,45 @@ class HardCodedUIConfig(Parameter):
         return True
 
 
+def all_subclasses(cls):
+    """ generator that returns all the known subtypes of the given type """
+    for s in cls.__subclasses__():
+        yield s
+        for ss in all_subclasses(s):
+            yield ss
+
+
+class ClassChooserParameter(Parameter):
+    """ Allow to choose between the subclasses of a class """
+    def __init__(self, klassType, *args, **kwargs):
+        Parameter.__init__(self, *args, **kwargs)
+        self.mapping = {}
+        for kls in all_subclasses(klassType):
+            self.mapping[kls.__name__] = kls
+
+    def toArgParse(self, parser):
+        parser.add_argument(*self.paramName,
+                            dest=self.name, choices=self.mapping.keys(),
+                            help=self.helpText +
+                            " (default to %s)" % self.default)
+
+    def fromArgs(self, args, optdict):
+        """ Take the value from the args parameter (from 'argparse'), and fill
+        it in the dict """
+        val = getattr(args, self.name)
+        if val:
+            optdict[self.varName] = self.mapping[val]
+
+    def fromFile(self, filedict, optdict):
+        """ Take the value from the filedict parameter and fill it in the dict
+        :returns: False if something went wrong
+        """
+        if self.paramOnly: return True
+        if self.name in filedict:
+            optdict[self.varName] = self.mapping[filedict[self.name]]
+        return True
+
+
 class Config(object):
     """Class holding the configuration to be applied during synchronization.
     The configuration can be loaded from a file in which case the defaults
@@ -243,13 +289,15 @@ class Config(object):
             opts = [
                 StrParameter('rcConfigName', 'rcconfigname', ('-c', '--config'), None, True, "use alternative configuration file"),
                 StrParameter('dumpDir', 'dump-dir', ('--dump-dir',), "~/.galileo", False, "directory for storing dumps"),
-                IntParameter('daemonPeriod', 'daemon-period', ('--daemon-period',), 15000, False, "sleep time in msec between sync runs when in daemon mode"),
+                IntParameter('daemonPeriod', 'daemon-period', ('--daemon-period',), 180000, False, "sleep time in msec between sync runs when in daemon mode"),
                 SetParameter('includeTrackers', 'include', ('-I', '--include'), None, False, "list of tracker IDs to sync (all if not specified)"),
                 SetParameter('excludeTrackers', 'exclude', ('-X', '--exclude'), set(), False, "list of tracker IDs to not sync"),
                 LogLevelParameter(),
+                ClassChooserParameter(ble.API, 'bluetoothConn', 'bluetooth_connection', ('--bluetooth',), tracker.FitbitClient, False, "Bluetooth API to use"),
                 BoolParameter('forceSync', 'force-sync', ('force',), False, False, "synchronize even if tracker reports a recent sync"),
                 BoolParameter('keepDumps', 'keep-dumps', ('dump',), True, False, "enable saving of the megadump to file"),
-                BoolParameter('doUpload', 'do-upload',  ('upload',), True, False, "upload the dump to the server"),
+                BoolParameter('doUpload', 'do-upload',  ('upload',), True, False, "upload the dump to the database"),
+                ClassChooserParameter(databases.Database, 'database', 'database', ('--db', '--database'), xml.RemoteXMLDatabase, False, "database to use for synchronisation"),
                 BoolParameter('httpsOnly', 'https-only', ('https-only',), True, False, "use http if https is not available"),
                 StrParameter('fitbitServer', 'fitbit-server', ('-s', '--fitbit-server',), "client.fitbit.com", False, "server used for synchronisation"),
                 IntParameter('logSize', 'log-size', ('--log-size',), 10, False, "Amount of communication to display in case of error"),
@@ -331,28 +379,27 @@ class Config(object):
         - `tracker`: Tracker (object), to check.
 
         """
-        trackerid = a2x(tracker.id, delim='')
 
         # If a list of trackers to sync is configured then was
         # provided then ignore this tracker if it's not in that list.
-        if (self.includeTrackers is not None) and (trackerid not in self.includeTrackers):
-            logger.info("Include list not empty, and tracker %s not there, skipping.", trackerid)
+        if (self.includeTrackers is not None) and (tracker.id not in self.includeTrackers):
+            logger.info("Include list not empty, and tracker %s not there, skipping.", tracker.id)
             tracker.status = "Skipped because not in include list"
             return True
 
         # If a list of trackers to avoid syncing is configured then
         # ignore this tracker if it is in that list.
-        if trackerid in self.excludeTrackers:
-            logger.info("Tracker %s in exclude list, skipping.", trackerid)
+        if tracker.id in self.excludeTrackers:
+            logger.info("Tracker %s in exclude list, skipping.", tracker.id)
             tracker.status = "Skipped because in exclude list"
             return True
 
         if tracker.syncedRecently:
             if not self.forceSync:
-                logger.info('Tracker %s was recently synchronized; skipping for now', trackerid)
+                logger.info('Tracker %s was recently synchronized; skipping for now', tracker.id)
                 tracker.status = "Skipped because recently synchronised"
                 return True
-            logger.info('Tracker %s was recently synchronized, but forcing synchronization anyway', trackerid)
+            logger.info('Tracker %s was recently synchronized, but forcing synchronization anyway', tracker.id)
 
         return False
 

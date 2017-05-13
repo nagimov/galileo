@@ -13,8 +13,9 @@ def a2x(a, delim=' '):
 
 
 def x2a(hexstr):
-    """ String of hex a to array """
-    return [int(x, 16) for x in hexstr.split(' ')]
+    """ String of hexa to array """
+    hexstr = hexstr.replace('\n', ' ').replace(':', ' ')
+    return bytearray(int(x, 16) for x in hexstr.split(' '))
 
 
 def a2s(a, toPrint=True):
@@ -60,6 +61,13 @@ def i2lsba(value, width):
         a[i] = (value >> (i*8)) & 0xff
     return a
 
+
+def i2msba(value, width):
+    """ int to bytearray (MSB first) """
+    a = bytearray(width)
+    for i in range(width):
+        a[width - i - 1] = (value >> (i*8)) & 0xff
+    return a
 
 def s2a(s):
     """ string to array """

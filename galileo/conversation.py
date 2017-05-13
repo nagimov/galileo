@@ -10,8 +10,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .dongle import FitBitDongle
-from .net import GalileoClient
-from .tracker import FitbitClient, MICRODUMP, MEGADUMP
+from .dump import MICRODUMP, MEGADUMP
+from .tracker import FitbitClient
 from .ui import MissingConfigError
 from .utils import a2x, s2a
 
@@ -32,7 +32,7 @@ class Conversation(object):
 
         self.fitbit = FitbitClient(self.dongle)
 
-        self.galileo = GalileoClient('https', 'client.fitbit.com',
+        self.galileo = config.database('https', 'client.fitbit.com',
                                 'tracker/client/message')
 
         if self.mode == 'firmware':
@@ -170,8 +170,8 @@ class Conversation(object):
 
         self.trackers = {}
         res = []
-        for tracker in self.fitbit.discover(FitBitUUID, minRSSI=immediateRsi,
-                                             minDuration=minDuration):
+        for tracker in self.fitbit.discover(FitBitUUID, 0xfb00, 0xfb01, 0xfb02, immediateRsi,
+                                             minDuration):
             trackerId = a2x(tracker.id, delim="")
             self.trackers[trackerId] = tracker
             res.append(('available-tracker', {},
