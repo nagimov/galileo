@@ -18,8 +18,10 @@ except ImportError as ie:
         print("You have an older pyusb version installed. This utility needs")
         print("at least version 1.0.0a2 to work properly.")
         print("Please upgrade your system to a newer version.")
-    raise ie
+    usb = None
+#    raise ie
 
+from .ble import DM
 from .utils import a2x, a2s
 
 IN, OUT = 1, -1
@@ -83,6 +85,8 @@ class USBDevice(object):
 
     @property
     def dev(self):
+        if usb is None:
+            return None
         if self._dev is None:
             self._dev = usb.core.find(idVendor=self.vid, idProduct=self.pid)
         return self._dev
@@ -98,14 +102,14 @@ class CtrlMessage(object):
         if INS is None:  # incoming
             self.len = data[0]
             self.INS = data[1]
-            self.payload = data[2:self.len]
+            self.payload = bytearray(data[2:self.len])
         else:  # outgoing
             self.len = len(data) + 2
             self.INS = INS
-            self.payload = data
+            self.payload = bytearray(data)
 
     def asList(self):
-        return [self.len, self.INS] + self.payload
+        return bytearray([self.len, self.INS]) + self.payload
 
     def __eq__(self, other):
         if other is None: return False
@@ -121,39 +125,6 @@ class CtrlMessage(object):
         return ' '.join(['%02X' % self.INS] + d + ['-', str(self.len)])
 
 CM = CtrlMessage
-
-
-class DataMessage(object):
-    """ A message that get communicated over the data link """
-    LENGTH = 32
-
-    def __init__(self, data, out=True):
-        if out:  # outgoing
-            if len(data) > (self.LENGTH - 1):
-                raise ValueError('data %s (%d) too big' % (data, len(data)))
-            self.data = data
-            self.len = len(data)
-        else:  # incoming
-            if len(data) != self.LENGTH:
-                raise ValueError('data %s with wrong length' % data)
-            # last byte is length
-            self.len = data[-1]
-            self.data = list(data[:self.len])
-
-    def asList(self):
-        return self.data + [0] * (self.LENGTH - 1 - self.len) + [self.len]
-
-    def __eq__(self, other):
-        if other is None: return False
-        return self.data == other.data
-
-    def __ne__(self, other):
-        return not self == other
-
-    def __str__(self):
-        return ' '.join(['[', a2x(self.data), ']', '-', str(self.len)])
-
-DM = DataMessage
 
 
 def isATimeout(excpt):
@@ -198,8 +169,8 @@ class FitBitDongle(USBDevice):
     def __init__(self, logsize):
         USBDevice.__init__(self, self.VID, self.PID)
         self.hasVersion = False
-        self.establishLinkEx = False
-        self.newerPyUSB = None
+        self.useEstablishLinkEx = False
+        self.olderPyUSB = None
         global log
         log = DataRing(logsize)
 
@@ -234,14 +205,13 @@ class FitBitDongle(USBDevice):
         self.minor = minor
         self.hasVersion = True
         # Leave it to False, I don't see any advantage in using it at the moment
-        # self.establishLinkEx = (major, minor) >= (2, 5)
+        self.useEstablishLinkEx = (major, minor) >= (2, 5)
         logger.debug('Fitbit dongle version major:%d minor:%d', self.major,
                      self.minor)
 
     def write(self, endpoint, data, timeout):
-        if self.newerPyUSB:
-            params = (endpoint, data, timeout)
-        else:
+        params = (endpoint, data, timeout)
+        if self.olderPyUSB:
             interface = {0x02: self.CtrlIF.bInterfaceNumber,
                          0x01: self.DataIF.bInterfaceNumber}[endpoint]
             params = (endpoint, data, interface, timeout)
@@ -249,11 +219,11 @@ class FitBitDongle(USBDevice):
         try:
             return self.dev.write(*params)
         except TypeError:
-            if self.newerPyUSB is not None:
+            if self.olderPyUSB is not None:
                 # Already been there, something else is happening ...
                 raise
-            logger.debug('Switching to a newer pyusb compatibility mode')
-            self.newerPyUSB = True
+            logger.debug('Switching to an older pyusb compatibility mode')
+            self.olderPyUSB = True
             return self.write(endpoint, data, timeout)
         except usb.core.USBError as ue:
             if ue.errno != errno.EIO:
@@ -263,9 +233,8 @@ class FitBitDongle(USBDevice):
             return self.dev.write(*params)
 
     def read(self, endpoint, length, timeout):
-        if self.newerPyUSB:
-            params = (endpoint, length, timeout)
-        else:
+        params = (endpoint, length, timeout)
+        if self.olderPyUSB:
             interface = {0x82: self.CtrlIF.bInterfaceNumber,
                          0x81: self.DataIF.bInterfaceNumber}[endpoint]
             params = (endpoint, length, interface, timeout)
@@ -273,11 +242,11 @@ class FitBitDongle(USBDevice):
         try:
             data = self.dev.read(*params)
         except TypeError:
-            if self.newerPyUSB is not None:
+            if self.olderPyUSB is not None:
                 # Already been there, something else is happening ...
                 raise
-            logger.debug('Switching to a newer pyusb compatibility mode')
-            self.newerPyUSB = True
+            logger.debug('Switching to an older pyusb compatibility mode')
+            self.olderPyUSB = True
             return self.read(endpoint, length, timeout)
         except usb.core.USBError as ue:
             if not isATimeout(ue):
@@ -321,3 +290,9 @@ class FitBitDongle(USBDevice):
             msg = DM(data, out=False)
         logger.debug('<== %s', msg or '...')
         return msg
+
+    _readData = data_read
+    _writeData = data_write
+
+    def info(self):
+        return "Dongle %d.%d" % (self.major, self.minor)

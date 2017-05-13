@@ -1,7 +1,7 @@
+# Prevent the conflict between the local xml module and the absolute xml module
+from __future__ import absolute_import
 
 import base64
-import random
-import socket
 
 from io import BytesIO
 
@@ -13,65 +13,13 @@ logger = logging.getLogger(__name__)
 
 import requests
 
-from . import __version__
-from .utils import s2a
+from .. import __version__
+from ..netUtils import BackOffException, ConnectionErrorToMessage, tuplesToXML, toXML, XMLToTuple
+from ..utils import s2a
+from . import Database, SyncError
 
 
-class SyncError(Exception):
-    def __init__(self, errorstring='Undefined'):
-        self.errorstring = errorstring
-
-
-class BackOffException(Exception):
-    def __init__(self, min, max):
-        self.min = min
-        self.max = max
-
-    def getAValue(self):
-        return random.randint(self.min, self.max)
-
-
-def toXML(name, attrs={}, childs=[], body=None):
-    elem = ET.Element(name, attrib=attrs)
-    if childs:
-        for XMLElem in tuplesToXML(childs):
-            elem.append(XMLElem)
-    if body is not None:
-        elem.text = body
-    return elem
-
-
-def tuplesToXML(tuples):
-    """ tuples is an array (or not) of (name, attrs, childs, body) """
-    if isinstance(tuples, tuple):
-        tuples = [tuples]
-    for tpl in tuples:
-        yield toXML(*tpl)
-
-
-def XMLToTuple(elem):
-    """ Transform an XML element into the following tuple:
-    (tagname, attributes, subelements, text) where:
-     - tagname is the element tag as string
-     - attributes is a dictionnary of the element attributes
-     - subelements are the sub elements as an array of tuple
-     - text is the content of the element, as string or None if no content is
-       there
-    """
-    childs = []
-    for child in elem:
-        childs.append(XMLToTuple(child))
-    return elem.tag, elem.attrib, childs, elem.text
-
-
-def ConnectionErrorToMessage(ce):
-    excpt = ce.args[0]
-    if isinstance(excpt, socket.error):
-        return excpt.reason.strerror
-    return 'ConnectionError'
-
-
-class GalileoClient(object):
+class RemoteXMLDatabase(Database):
     ID = '6de4df71-17f9-43ea-9854-67f842021e05'
 
     def __init__(self, scheme, host, path, port=None):

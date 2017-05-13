@@ -15,8 +15,9 @@ import requests
 from . import __version__
 from .config import Config, ConfigError
 from .conversation import Conversation
-from .net import GalileoClient, SyncError, BackOffException
-from .tracker import FitbitClient
+from .databases import SyncError
+from .dump import MEGADUMP
+from .netUtils import BackOffException
 from .ui import InteractiveUI
 from .utils import a2x
 from . import dongle as dgl
@@ -27,44 +28,38 @@ FitBitUUID = uuid.UUID('{ADAB0000-6E7D-4601-BDA2-BFFAA68956BA}')
 
 def syncAllTrackers(config):
     logger.debug('%s initialising', os.path.basename(sys.argv[0]))
-    dongle = dgl.FitBitDongle(config.logSize)
-    if not dongle.setup():
+    fitbit = config.bluetoothConn(config.logSize)
+    if not fitbit.setup():
         logger.error("No dongle connected, aborting")
         return
 
-    fitbit = FitbitClient(dongle)
+    galileo = config.database('https', config.fitbitServer,
+                              'tracker/client/message')
 
-    galileo = GalileoClient('https', config.fitbitServer,
-                            'tracker/client/message')
-
-    if not fitbit.disconnect():
+    if not fitbit.disconnectAll():
         logger.error("Dirty state, not able to start synchronisation.")
-        fitbit.exhaust()
         return
 
-    if not fitbit.getDongleInfo():
+    if not fitbit.getHardwareInfo():
         logger.warning('Failed to get connected Fitbit dongle information')
 
     logger.info('Discovering trackers to synchronize')
 
-    trackers = [t for t in fitbit.discover(FitBitUUID)]
+    trackers = [t for t in fitbit.discover(FitBitUUID, 0xfb00, 0xfb01, 0xfb02, -255, 4000)]
 
     logger.info('%d trackers discovered', len(trackers))
     for tracker in trackers:
-        logger.debug('Discovered tracker with ID %s',
-                     a2x(tracker.id, delim=""))
+        logger.debug('Discovered tracker with ID %s', tracker.id)
 
     for tracker in trackers:
 
-        trackerid = a2x(tracker.id, delim="")
-
         # Skip this tracker based on include/exclude lists.
         if config.shouldSkip(tracker):
-            logger.info('Tracker %s skipped due to configuration', trackerid)
+            logger.info('Tracker %s skipped due to configuration', tracker.id)
             yield tracker
             continue
 
-        logger.info('Attempting to synchronize tracker %s', trackerid)
+        logger.info('Attempting to synchronize tracker %s', tracker.id)
 
         if config.doUpload:
             logger.debug('Connecting to Fitbit server and requesting status')
@@ -73,10 +68,9 @@ def syncAllTrackers(config):
                 break
 
         logger.debug('Establishing link with tracker')
-        if not (fitbit.establishLink(tracker) and fitbit.toggleTxPipe(True)
-                and fitbit.initializeAirlink(tracker)):
+        if not fitbit.connect(tracker):
             logger.warning('Unable to connect with tracker %s. Skipping',
-                           trackerid)
+                           tracker.id)
             fitbit.disconnect(tracker)
             tracker.status = 'Unable to establish a connection.'
             yield tracker
@@ -86,7 +80,7 @@ def syncAllTrackers(config):
         #time.sleep(5)
 
         logger.info('Getting data from tracker')
-        dump = fitbit.getDump()
+        dump = fitbit.getDump(MEGADUMP)
         if dump is None:
             logger.error("Error downloading the dump from tracker")
             fitbit.disconnect(tracker)
@@ -97,7 +91,7 @@ def syncAllTrackers(config):
         if config.keepDumps:
             # Write the dump somewhere for archiving ...
             dirname = os.path.expanduser(os.path.join(config.dumpDir,
-                                                      trackerid))
+                                                      tracker.id))
             if not os.path.exists(dirname):
                 logger.debug("Creating non-existent directory for dumps %s",
                              dirname)
@@ -113,7 +107,7 @@ def syncAllTrackers(config):
         else:
             logger.info('Sending tracker data to Fitbit')
             try:
-                response = galileo.sync(fitbit.dongle, trackerid, dump)
+                response = galileo.sync(fitbit, tracker.id, dump)
 
                 if config.keepDumps:
                     logger.debug("Appending answer from server to %s",
@@ -131,20 +125,20 @@ def syncAllTrackers(config):
                 logger.info('Passing Fitbit response to tracker')
                 if not fitbit.uploadResponse(response):
                     logger.warning("Error while trying to give Fitbit response"
-                                   " to tracker %s", trackerid)
+                                   " to tracker %s", tracker.id)
                     tracker.status = "Failed to upload fitbit response to tracker"
                 else:
                     tracker.status = "Synchronisation successful"
 
             except SyncError as e:
                 logger.error("Fitbit server refused data from tracker %s,"
-                             " reason: %s", trackerid, e.errorstring)
+                             " reason: %s", tracker.id, e.errorstring)
                 tracker.status = "Synchronisation failed: %s" % e.errorstring
 
         logger.debug('Disconnecting from tracker')
-        if not (fitbit.terminateAirlink() and fitbit.toggleTxPipe(False) and fitbit.ceaseLink()):
+        if not fitbit.disconnect(tracker):
             logger.warning('Error while disconnecting from tracker %s',
-                           trackerid)
+                           tracker.id)
             tracker.status += " (Error disconnecting)"
         yield tracker
 
@@ -163,16 +157,19 @@ The dongle must then be removed and reinserted to receive the new permissions.""
 def version(verbose, delim='\n'):
     s = ['%s: %s' % (sys.argv[0], __version__)]
     if verbose:
-        import usb
         import platform
         from .config import yaml
         # To get it on one line
         s.append('Python: %s' % ' '.join(sys.version.split()))
         s.append('Platform: %s' % ' '.join(platform.uname()))
-        if not hasattr(usb, '__version__'):
-            s.append('pyusb: < 1.0.0b1')
-        else:
-            s.append('pyusb: %s' % usb.__version__)
+        try:
+            import usb
+            if not hasattr(usb, '__version__'):
+                s.append('pyusb: < 1.0.0b1')
+            else:
+                s.append('pyusb: %s' % usb.__version__)
+        except ImportError:
+            s.append("No pyusb")
         s.append('requests: %s' % requests.__version__)
         if hasattr(yaml, '__with_libyaml__'):
             # Genuine PyYAML
@@ -193,8 +190,7 @@ def sync(config):
     statuses = []
     try:
         for tracker in syncAllTrackers(config):
-            statuses.append("Tracker: %s: %s" % (a2x(tracker.id, ''),
-                                                 tracker.status))
+            statuses.append("Tracker: %s: %s" % (tracker.id, tracker.status))
     except BackOffException as boe:
         print("The server requested that we come back between %d and %d"\
             " minutes." % (boe.min / (60*1000), boe.max / (60*1000)))
@@ -215,8 +211,7 @@ def daemon(config):
             # TODO: Extract the initialization part, and do it once for all
             try:
                 for tracker in syncAllTrackers(config):
-                    logger.info("Tracker %s: %s" % (a2x(tracker.id, ''),
-                                                    tracker.status))
+                    logger.info("Tracker %s: %s" % (tracker.id, tracker.status))
             except BackOffException as boe:
                 logger.warning("Received a back-off notice from the server,"
                                " waiting for a bit longer.")
