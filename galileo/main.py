@@ -27,7 +27,7 @@ FitBitUUID = uuid.UUID('{ADAB0000-6E7D-4601-BDA2-BFFAA68956BA}')
 ServiceID = 0xfb00
 ReadID = 0xfb01
 WriteID = 0xfb02
-DiscoverTimeout = 4  # s
+DiscoverTimeout = 180  # s
 
 def syncAllTrackers(config):
     logger.debug('%s initialising', os.path.basename(sys.argv[0]))
