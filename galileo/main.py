@@ -24,7 +24,7 @@ from . import dongle as dgl
 from . import interactive
 
 FitBitUUID = uuid.UUID('{ADAB0000-6E7D-4601-BDA2-BFFAA68956BA}')
-ServiceID = 0xfb00
+ServiceID = 0x4d2a  # my fitbit zip is 0x4d2a while Alta HR is 0xfb00
 ReadID = 0xfb01
 WriteID = 0xfb02
 DiscoverTimeout = 180  # s
