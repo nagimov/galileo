@@ -89,20 +89,27 @@ class PyDBUS(API):
                 raise
         return True
 
-    def discover(self, baseUUID, service1, read, write, minRSSI, timeout):
+    def discover(self, baseUUID, service1, read, write, minRSSI, timeout, num_trackers=1):
         service = str(maskUUID(baseUUID, service1))
         self.readUUID = str(maskUUID(baseUUID, read))
         self.writeUUID = str(maskUUID(baseUUID, write))
         trackers = []
         def new_iface(*args):
             logger.debug("Discovered: %s", args)
-            trackers.append(args[0])
+            if service in args[1]['org.bluez.Device1']['UUIDs']:
+                trackers.append(args[0])
+            if len(trackers) >= num_trackers:
+                logger.info("Required number of trackers discovered")
+                finish_discovery()
 
-        def stop_discovery():
+        def finish_discovery():
             self.adapter.StopDiscovery()
             self.loop.quit()
             logger.info("Discovery done, found %d trackers", len(trackers))
             # remove the timeout handler from the sources.
+
+        def stop_discovery():
+            finish_discovery()
             return False
 
         # listen for InterfaceAdded
@@ -122,7 +129,7 @@ class PyDBUS(API):
         self.manager.onInterfacesAdded = None
 
         # Go through the one that have actually been added
-        for path, obj in self._getObjects('org.bluez.Device1', lambda obj: service in obj['UUIDs']):
+        for path, obj in self._getObjects('org.bluez.Device1'):
             if path not in trackers:
                 # Old one, was not discovered this round
                 continue
