@@ -93,7 +93,6 @@ class PyDBUS(API):
         service = str(maskUUID(baseUUID, service1))
         self.readUUID = str(maskUUID(baseUUID, read))
         self.writeUUID = str(maskUUID(baseUUID, write))
-
         trackers = []
         def new_iface(*args):
             logger.debug("Discovered: %s", args)
@@ -139,16 +138,20 @@ class PyDBUS(API):
                 continue
             yield DbusTracker(tracker_id, serviceData, path)
 
-    def connect(self, tracker):
+    def connect(self, tracker, attempts=10):
         self.tracker = self.bus.get('org.bluez', tracker.path)
         self.tracker.Trusted = True
+        for i in range(attempts):
+            if not self.tracker.Connected:
+                logger.info("Connecting to tracker (attempt {})".format(i))
+                try:
+                    self.tracker.Connect()
+                    break
+                except GLib.GError as gerr:
+                    conn_error = "Received GLib Error: %s", gerr.message
         if not self.tracker.Connected:
-            logger.info("Connecting to tracker")
-            try:
-                self.tracker.Connect()
-            except GLib.GError as gerr:
-                logger.error("Received GLib Error: %s", gerr.message)
-                return False
+            logger.error(conn_error)
+            return False
         logger.debug("Waiting for service discovery")
         def discovered(iface, changed, invalidated):
             if not changed.get('ServicesResolved', False):
