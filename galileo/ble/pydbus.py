@@ -181,7 +181,7 @@ class PyDBUS(API):
                 self.write = self.bus.get('org.bluez', path)
 
         if self.read is None:
-            log.error("Unable to get the Connection Characteristics")
+            logger.error("Unable to get the Connection Characteristics")
             return False
 
         def received(iface, changed, invalidated):
