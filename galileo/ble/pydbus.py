@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 import time
 import uuid
+import pexpect
 
 try:
     import pydbus
@@ -15,6 +16,18 @@ except ImportError:
 from ..tracker import Tracker
 from ..utils import x2a, a2x
 from . import API, DM
+
+class BluetoothctlWrapper:
+    def __init__(self):
+        self.obj = pexpect.spawn("bluetoothctl", echo = False)
+
+    def send_cmd(self, cmd, exp="bluetooth"):
+        self.obj.send(cmd + "\n")
+        time.sleep(1)
+        self.obj.expect([exp, pexpect.EOF])
+
+    def quit(self):
+        self.obj.terminate(force=True)
 
 class DbusTracker(Tracker):
     def __init__(self, id, serviceData, path):
@@ -93,6 +106,12 @@ class PyDBUS(API):
         service = str(maskUUID(baseUUID, service1))
         self.readUUID = str(maskUUID(baseUUID, read))
         self.writeUUID = str(maskUUID(baseUUID, write))
+
+        # send "scan on" via bluetoothctl
+        self.btctl = BluetoothctlWrapper()
+        self.btctl.send_cmd("disconnect", "\[")
+        self.btctl.send_cmd("scan on")
+
         trackers = []
         def new_iface(*args):
             logger.debug("Discovered: %s", args)
@@ -256,6 +275,9 @@ class PyDBUS(API):
             self.tracker.Disconnect()
             self.tracker = None
         self.adapter.RemoveDevice(tracker.path)
+        # stop scan an exit bluetoothctl
+        self.btctl.send_cmd("scan off")
+        self.btctl.quit()
         return True
 
     def info(self):
