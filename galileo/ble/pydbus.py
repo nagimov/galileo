@@ -236,7 +236,7 @@ class PyDBUS(API):
         self.write.WriteValue(data.data, {})
 
 
-    def _readData(self, timeout=3000):
+    def _readData(self, timeout=30000):
         """ So, read data only empty the queue """
         while not self.readqueue:
             if timeout <= 0:
