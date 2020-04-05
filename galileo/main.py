@@ -24,7 +24,7 @@ from . import dongle as dgl
 from . import interactive
 
 FitBitUUID = uuid.UUID('{ADAB0000-6E7D-4601-BDA2-BFFAA68956BA}')
-ServiceID = 0x4d2a  # my fitbit zip is 0x4d2a while Alta HR is 0xfb00
+ServiceIDs = [0x4d2a, 0xfb00]  # my fitbit zip can be 0x4d2a or 0xfb00
 ReadID = 0xfb01
 WriteID = 0xfb02
 DiscoverTimeout = 180  # s
@@ -48,7 +48,7 @@ def syncAllTrackers(config):
 
     logger.info('Discovering trackers to synchronize')
 
-    trackers = [t for t in fitbit.discover(FitBitUUID, ServiceID, ReadID, WriteID, -255, DiscoverTimeout * 1000)]
+    trackers = [t for t in fitbit.discover(FitBitUUID, ServiceIDs, ReadID, WriteID, -255, DiscoverTimeout * 1000)]
 
     logger.info('%d trackers discovered', len(trackers))
     for tracker in trackers:

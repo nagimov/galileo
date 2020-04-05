@@ -103,7 +103,7 @@ class PyDBUS(API):
         return True
 
     def discover(self, baseUUID, service1, read, write, minRSSI, timeout, num_trackers=1):
-        service = str(maskUUID(baseUUID, service1))
+        services = [str(maskUUID(baseUUID, s)) for s in service1]
         self.readUUID = str(maskUUID(baseUUID, read))
         self.writeUUID = str(maskUUID(baseUUID, write))
 
@@ -115,8 +115,9 @@ class PyDBUS(API):
         trackers = []
         def new_iface(*args):
             logger.debug("Discovered: %s", args)
-            if service in args[1]['org.bluez.Device1']['UUIDs']:
-                trackers.append(args[0])
+            for s in services:
+                if s in args[1]['org.bluez.Device1']['UUIDs']:
+                    trackers.append(args[0])
             if len(trackers) >= num_trackers:
                 logger.info("Required number of trackers discovered")
                 finish_discovery()
@@ -137,7 +138,7 @@ class PyDBUS(API):
         GLib.timeout_add(timeout, stop_discovery)
         # Start the discovery
         try:
-            self.adapter.SetDiscoveryFilter({'UUIDs': GLib.Variant('as', [service]), 'Transport': GLib.Variant('s', 'le')})
+            self.adapter.SetDiscoveryFilter({'UUIDs': GLib.Variant('as', services), 'Transport': GLib.Variant('s', 'le')})
         except AttributeError:
             # SetDiscoveryFilter not present. It's not critical as we filter afterward anyway.
             logger.warning("Setting of discovery filter not supported")
