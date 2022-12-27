@@ -17,7 +17,7 @@ class RemoteRESTDatabase(RemoteXMLDatabase):
 
     def sync(self, dongle, trackerId, megadump):
 
-        url = "https://desktop-client.fitbit.com/1/devices/client/tracker/data/sync.json"
+        url = "https://android-cdn-client.fitbit.com/1/devices/client/tracker/data/sync.json"
 
         headers = {
             "Content-Type": "text/plain",
