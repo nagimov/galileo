@@ -102,8 +102,8 @@ class PyDBUS(API):
                 raise
         return True
 
-    def discover(self, baseUUID, service1, read, write, minRSSI, timeout, num_trackers=1):
-        services = [str(maskUUID(baseUUID, s)) for s in service1]
+    def discover(self, baseUUID, ExtraFitBitUUIDs, service1, read, write, minRSSI, timeout, num_trackers=1):
+        services = [str(maskUUID(baseUUID, s)) for s in service1] + ExtraFitBitUUIDs
         self.readUUID = str(maskUUID(baseUUID, read))
         self.writeUUID = str(maskUUID(baseUUID, write))
 
